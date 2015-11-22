@@ -17,6 +17,7 @@ import scala.util._
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 import akka.persistence.journal.AsyncWriteJournal
+import akka.persistence.journal.Tagged
 
 /**
  * INTERNAL API.
@@ -62,7 +63,7 @@ private[persistence] trait LeveldbStore extends Actor with WriteJournalBase with
               case _ ⇒ (p, Set.empty[String])
             }
             if (tags.nonEmpty && hasTagSubscribers)
-              allTags ++= tags
+              allTags = allTags union tags
 
             require(!p2.persistenceId.startsWith(tagPersistenceIdPrefix),
               s"persistenceId [${p.persistenceId}] must not start with $tagPersistenceIdPrefix")
@@ -96,8 +97,13 @@ private[persistence] trait LeveldbStore extends Actor with WriteJournalBase with
           if (iter.hasNext) keyFromBytes(iter.peekNext().getKey).sequenceNr else Long.MaxValue
         }
 
-        fromSequenceNr to toSequenceNr foreach { sequenceNr ⇒
-          batch.delete(keyToBytes(Key(nid, sequenceNr, 0)))
+        if (fromSequenceNr != Long.MaxValue) {
+          val toSeqNr = math.min(toSequenceNr, readHighestSequenceNr(nid))
+          var sequenceNr = fromSequenceNr
+          while (sequenceNr <= toSeqNr) {
+            batch.delete(keyToBytes(Key(nid, sequenceNr, 0)))
+            sequenceNr += 1
+          }
         }
       }
     } catch {

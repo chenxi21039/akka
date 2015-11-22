@@ -177,6 +177,11 @@ class Serialization(val system: ExtendedActorSystem) extends Extension {
         }
         serializerMap.putIfAbsent(clazz, ser) match {
           case null ⇒
+            if (shouldWarnAboutJavaSerializer(clazz, ser)) {
+              log.warning("Using the default Java serializer for class [{}] which is not recommended because of " +
+                "performance implications. Use another serializer or disable this warning using the setting " +
+                "'akka.actor.warn-about-java-serializer-usage'", clazz.getName)
+            }
             log.debug("Using serializer[{}] for message [{}]", ser.getClass.getName, clazz.getName)
             ser
           case some ⇒ some
@@ -205,7 +210,15 @@ class Serialization(val system: ExtendedActorSystem) extends Extension {
    *  It is primarily ordered by the most specific classes first, and secondly in the configured order.
    */
   private[akka] val bindings: immutable.Seq[ClassSerializer] =
-    sort(for ((k: String, v: String) ← settings.SerializationBindings if v != "none") yield (system.dynamicAccess.getClassFor[Any](k).get, serializers(v))).to[immutable.Seq]
+    sort(for ((k: String, v: String) ← settings.SerializationBindings if v != "none" && checkGoogleProtobuf(k))
+      yield (system.dynamicAccess.getClassFor[Any](k).get, serializers(v))).to[immutable.Seq]
+
+  // com.google.protobuf serialization binding is only used if the class can be loaded,
+  // i.e. com.google.protobuf dependency has been added in the application project.
+  // The reason for this special case is for backwards compatibility so that we still can
+  // include "com.google.protobuf.GeneratedMessage" = proto in configured serialization-bindings.
+  private def checkGoogleProtobuf(className: String): Boolean =
+    (!className.startsWith("com.google.protobuf") || system.dynamicAccess.getClassFor[Any](className).isSuccess)
 
   /**
    * Sort so that subtypes always precede their supertypes, but without
@@ -232,6 +245,11 @@ class Serialization(val system: ExtendedActorSystem) extends Extension {
    */
   val serializerByIdentity: Map[Int, Serializer] =
     Map(NullSerializer.identifier -> NullSerializer) ++ serializers map { case (_, v) ⇒ (v.identifier, v) }
+
+  private def shouldWarnAboutJavaSerializer(serializedClass: Class[_], serializer: Serializer) =
+    settings.config.getBoolean("akka.actor.warn-about-java-serializer-usage") &&
+      serializer.isInstanceOf[JavaSerializer] &&
+      !serializedClass.getName.startsWith("akka.")
 
 }
 

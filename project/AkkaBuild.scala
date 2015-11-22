@@ -17,6 +17,8 @@ import com.typesafe.sbt.pgp.PgpKeys.publishSigned
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 import sbt.Keys._
 import sbt._
+import sbtunidoc.Plugin.ScalaUnidoc
+import sbtunidoc.Plugin.UnidocKeys._
 
 object AkkaBuild extends Build {
   System.setProperty("akka.mode", "test") // Is there better place for this?
@@ -44,6 +46,14 @@ object AkkaBuild extends Build {
       parallelExecution in GlobalScope := System.getProperty("akka.parallelExecution", parallelExecutionByDefault.toString).toBoolean,
       Dist.distExclude := Seq(actorTests.id, docs.id, samples.id, osgi.id),
 
+      // FIXME problem with scalaunidoc:doc, there must be a better way
+      unidocProjectFilter in (ScalaUnidoc, unidoc) := inAnyProject -- inProjects(protobuf, samples,
+        sampleCamelJava, sampleCamelScala, sampleClusterJava, sampleClusterScala, sampleFsmScala, sampleFsmJavaLambda,
+        sampleMainJava, sampleMainScala, sampleMainJavaLambda, sampleMultiNodeScala,
+        samplePersistenceJava, samplePersistenceScala, samplePersistenceJavaLambda,
+        sampleRemoteJava, sampleRemoteScala, sampleSupervisionJavaLambda,
+        sampleDistributedDataScala, sampleDistributedDataJava),
+
       S3.host in S3.upload := "downloads.typesafe.com.s3.amazonaws.com",
       S3.progress in S3.upload := true,
       mappings in S3.upload <<= (Release.releaseDirectory, version) map { (d, v) =>
@@ -54,7 +64,7 @@ object AkkaBuild extends Build {
     ),
     aggregate = Seq(actor, testkit, actorTests, remote, remoteTests, camel,
       cluster, clusterMetrics, clusterTools, clusterSharding, distributedData,
-      slf4j, agent, persistence, persistenceQuery, persistenceTck, kernel, osgi, docs, contrib, samples, multiNodeTestkit, benchJmh, typed)
+      slf4j, agent, persistence, persistenceQuery, persistenceTck, kernel, osgi, docs, contrib, samples, multiNodeTestkit, benchJmh, typed, protobuf)
   )
 
   lazy val akkaScalaNightly = Project(
@@ -64,7 +74,7 @@ object AkkaBuild extends Build {
     // samples don't work with dbuild right now
     aggregate = Seq(actor, testkit, actorTests, remote, remoteTests, camel,
       cluster, clusterMetrics, clusterTools, clusterSharding, distributedData,
-      slf4j, persistence, persistenceQuery, persistenceTck, kernel, osgi, contrib, multiNodeTestkit, benchJmh, typed)
+      slf4j, persistence, persistenceQuery, persistenceTck, kernel, osgi, contrib, multiNodeTestkit, benchJmh, typed, protobuf)
   ).disablePlugins(ValidatePullRequest)
 
   lazy val actor = Project(
@@ -96,10 +106,15 @@ object AkkaBuild extends Build {
     dependencies = Seq(actor, persistence, testkit).map(_ % "compile;compile->test;provided->provided")
   ).disablePlugins(ValidatePullRequest)
 
+  lazy val protobuf = Project(
+    id = "akka-protobuf",
+    base = file("akka-protobuf")
+  )
+
   lazy val remote = Project(
     id = "akka-remote",
     base = file("akka-remote"),
-    dependencies = Seq(actor, actorTests % "test->test", testkit % "test->test")
+    dependencies = Seq(actor, actorTests % "test->test", testkit % "test->test", protobuf)
   )
 
   lazy val multiNodeTestkit = Project(
@@ -164,7 +179,7 @@ object AkkaBuild extends Build {
   lazy val persistence = Project(
     id = "akka-persistence",
     base = file("akka-persistence"),
-    dependencies = Seq(actor, remote % "test->test", testkit % "test->test")
+    dependencies = Seq(actor, remote % "test->test", testkit % "test->test", protobuf)
   )
 
   lazy val persistenceQuery = Project(
@@ -389,17 +404,28 @@ object AkkaBuild extends Build {
     mavenLocalResolverSettings ++
     JUnitFileReporting.settings ++ StatsDMetrics.settings
 
-  def akkaPreviousArtifact(id: String): Def.Initialize[Option[sbt.ModuleID]] = Def.setting {
+  def akkaPreviousArtifacts(id: String): Def.Initialize[Set[sbt.ModuleID]] = Def.setting {
     if (enableMiMa) {
-      val version: String = "2.3.11" // FIXME verify all 2.3.x versions
-      val fullId = crossVersion.value match {
-        case _ : CrossVersion.Binary => id + "_" + scalaBinaryVersion.value
-        case _ : CrossVersion.Full => id + "_" + scalaVersion.value
-        case CrossVersion.Disabled => id
+      val versions = {
+        val akka23Versions = Seq("2.3.11", "2.3.12", "2.3.13", "2.3.14")
+        val akka24Versions = Seq("2.4.0")
+        val akka24NewArtifacts = Seq(
+          "akka-cluster-sharding",
+          "akka-cluster-tools",
+          "akka-persistence",
+          "akka-distributed-data-experimental",
+          "akka-persistence-query-experimental"
+        )
+        scalaBinaryVersion.value match {
+          case "2.11" if !akka24NewArtifacts.contains(id) => akka23Versions ++ akka24Versions
+          case _ => akka24Versions // Only Akka 2.4.x for scala > than 2.11
+        }
       }
-      Some(organization.value % fullId % version) // the artifact to compare binary compatibility with
+
+      // check against all binary compatible artifacts
+      versions.map(organization.value %% id % _).toSet
     }
-    else None
+    else Set.empty
   }
 
   def loadSystemProperties(fileName: String): Unit = {

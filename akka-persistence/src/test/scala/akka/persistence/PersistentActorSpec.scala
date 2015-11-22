@@ -188,35 +188,6 @@ object PersistentActorSpec {
     }
   }
 
-  class UserStashPersistentActor(name: String) extends ExamplePersistentActor(name) {
-    var stashed = false
-    val receiveCommand: Receive = {
-      case Cmd("a") ⇒ if (!stashed) { stash(); stashed = true } else sender() ! "a"
-      case Cmd("b") ⇒ persist(Evt("b"))(evt ⇒ sender() ! evt.data)
-      case Cmd("c") ⇒ unstashAll(); sender() ! "c"
-    }
-  }
-
-  class UserStashManyPersistentActor(name: String) extends ExamplePersistentActor(name) {
-    val receiveCommand: Receive = commonBehavior orElse {
-      case Cmd("a") ⇒ persist(Evt("a")) { evt ⇒
-        updateState(evt)
-        context.become(processC)
-      }
-      case Cmd("b-1") ⇒ persist(Evt("b-1"))(updateState)
-      case Cmd("b-2") ⇒ persist(Evt("b-2"))(updateState)
-    }
-
-    val processC: Receive = {
-      case Cmd("c") ⇒
-        persist(Evt("c")) { evt ⇒
-          updateState(evt)
-          context.unbecome()
-        }
-        unstashAll()
-      case other ⇒ stash()
-    }
-  }
   class AsyncPersistPersistentActor(name: String) extends ExamplePersistentActor(name) {
     var counter = 0
 
@@ -275,6 +246,22 @@ object PersistentActorSpec {
           sender() ! s"${evt.data}-a-${sendMsgCounter.incrementAndGet()}"
         }
         persistAsync(event) { evt ⇒ sender() ! s"${evt.data}-b-${sendMsgCounter.incrementAndGet()}" }
+    }
+  }
+  class PersistAllNilPersistentActor(name: String) extends ExamplePersistentActor(name) {
+
+    val receiveCommand: Receive = commonBehavior orElse {
+      case Cmd(data: String) if data contains "defer" ⇒
+        deferAsync("before-nil")(sender() ! _)
+        persistAll(Nil)(_ ⇒ sender() ! "Nil")
+        deferAsync("after-nil")(sender() ! _)
+        sender() ! data
+
+      case Cmd(data: String) if data contains "persist" ⇒
+        persist("before-nil")(sender() ! _)
+        persistAll(Nil)(_ ⇒ sender() ! "Nil")
+        deferAsync("after-nil")(sender() ! _)
+        sender() ! data
     }
   }
   class AsyncPersistAndPersistMixedSyncAsyncSyncPersistentActor(name: String) extends ExamplePersistentActor(name) {
@@ -343,27 +330,6 @@ object PersistentActorSpec {
     private def incCounter(): Int = {
       counter += 1
       counter
-    }
-  }
-
-  class UserStashFailurePersistentActor(name: String) extends ExamplePersistentActor(name) {
-    val receiveCommand: Receive = commonBehavior orElse {
-      case Cmd(data) ⇒
-        if (data == "b-2") throw new TestException("boom")
-        persist(Evt(data)) { event ⇒
-          updateState(event)
-          if (data == "a") context.become(otherCommandHandler)
-        }
-    }
-
-    val otherCommandHandler: Receive = {
-      case Cmd("c") ⇒
-        persist(Evt("c")) { event ⇒
-          updateState(event)
-          context.unbecome()
-        }
-        unstashAll()
-      case other ⇒ stash()
     }
   }
 
@@ -776,34 +742,6 @@ abstract class PersistentActorSpec(config: Config) extends PersistenceSpec(confi
       persistentActor ! Cmd("a")
       expectMsg("a")
     }
-    "support user stash operations" in {
-      val persistentActor = namedPersistentActor[UserStashPersistentActor]
-      persistentActor ! Cmd("a")
-      persistentActor ! Cmd("b")
-      persistentActor ! Cmd("c")
-      expectMsg("b")
-      expectMsg("c")
-      expectMsg("a")
-    }
-    "support user stash operations with several stashed messages" in {
-      val persistentActor = namedPersistentActor[UserStashManyPersistentActor]
-      val n = 10
-      val cmds = 1 to n flatMap (_ ⇒ List(Cmd("a"), Cmd("b-1"), Cmd("b-2"), Cmd("c")))
-      val evts = 1 to n flatMap (_ ⇒ List("a", "c", "b-1", "b-2"))
-
-      cmds foreach (persistentActor ! _)
-      persistentActor ! GetState
-      expectMsg((List("a-1", "a-2") ++ evts))
-    }
-    "support user stash operations under failures" in {
-      val persistentActor = namedPersistentActor[UserStashFailurePersistentActor]
-      val bs = 1 to 10 map ("b-" + _)
-      persistentActor ! Cmd("a")
-      bs foreach (persistentActor ! Cmd(_))
-      persistentActor ! Cmd("c")
-      persistentActor ! GetState
-      expectMsg(List("a-1", "a-2", "a", "c") ++ bs.filter(_ != "b-2"))
-    }
     "be able to persist events that extend AnyVal" in {
       val persistentActor = namedPersistentActor[AnyValEventPersistentActor]
       persistentActor ! Cmd("a")
@@ -862,6 +800,17 @@ abstract class PersistentActorSpec(config: Config) extends PersistenceSpec(confi
       expectMsg("x-a-1")
       expectMsg("x-b-2")
       expectNoMsg(100.millis)
+    }
+    "support calling persistAll with Nil" in {
+      val persistentActor = namedPersistentActor[PersistAllNilPersistentActor]
+      persistentActor ! Cmd("defer-x")
+      expectMsg("before-nil")
+      expectMsg("after-nil")
+      expectMsg("defer-x")
+      persistentActor ! Cmd("persist-x")
+      expectMsg("persist-x")
+      expectMsg("before-nil")
+      expectMsg("after-nil")
     }
     "support a mix of persist calls (sync, async, sync) and persist calls in expected order" in {
       val persistentActor = namedPersistentActor[AsyncPersistAndPersistMixedSyncAsyncSyncPersistentActor]
@@ -1129,6 +1078,18 @@ abstract class PersistentActorSpec(config: Config) extends PersistenceSpec(confi
       expectMsgType[DeleteMessagesSuccess]
       persistentActor ! GetState
       expectMsg(List("b-1", "b-2"))
+    }
+
+    "be able to delete all events" in {
+      val persistentActor = namedPersistentActor[Behavior1PersistentActor]
+      persistentActor ! Cmd("b")
+      persistentActor ! GetState
+      expectMsg(List("a-1", "a-2", "b-1", "b-2"))
+      persistentActor ! Delete(Long.MaxValue)
+      persistentActor ! "boom" // restart, recover
+      expectMsgType[DeleteMessagesSuccess]
+      persistentActor ! GetState
+      expectMsg(Nil)
     }
 
   }

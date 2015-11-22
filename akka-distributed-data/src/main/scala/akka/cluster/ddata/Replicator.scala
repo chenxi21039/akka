@@ -10,7 +10,7 @@ import scala.collection.immutable.Queue
 import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.forkjoin.ThreadLocalRandom
+import java.util.concurrent.ThreadLocalRandom
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
@@ -1359,13 +1359,15 @@ private[akka] class WriteAggregator(
 
   def receive = {
     case WriteAck ⇒
-      remaining -= sender().path.address
+      remaining -= senderAddress()
       if (remaining.size == doneWhenRemainingSize)
         reply(ok = true)
     case SendToSecondary ⇒
       secondaryNodes.foreach { replica(_) ! writeMsg }
     case ReceiveTimeout ⇒ reply(ok = false)
   }
+
+  def senderAddress(): Address = sender().path.address
 
   def reply(ok: Boolean): Unit = {
     if (ok && envelope.data == DeletedData)

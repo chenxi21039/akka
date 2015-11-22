@@ -196,7 +196,7 @@ message from network failures and JVM crashes, in addition to graceful terminati
 actor.
 
 The heartbeat arrival times is interpreted by an implementation of
-`The Phi Accrual Failure Detector <http://ddg.jaist.ac.jp/pub/HDY+04.pdf>`_.
+`The Phi Accrual Failure Detector <http://www.jaist.ac.jp/~defago/files/pdf/IS_RR_2004_010.pdf>`_.
 
 The suspicion level of failure is given by a value called *phi*.
 The basic idea of the phi failure detector is to express the value of *phi* on a scale that
@@ -469,3 +469,27 @@ There are lots of configuration properties that are related to remoting in Akka.
    best done by using something like the following:
 
    .. includecode:: code/docs/remoting/RemoteDeploymentDocTest.java#programmatic
+
+.. _remote-configuration-nat-java:
+
+Remote configuration for NAT and Docker
+---------------------------------------
+
+In setups involving Network Address Translation (NAT), Load Balancers or Docker
+containers the hostname and port pair that akka binds to will be different than the "logical"
+host name and port pair that is used to connect to the system from the outside. This requires
+special configuration that sets both the logical and the bind pairs for remoting.
+
+.. code-block:: ruby
+
+  akka {
+    remote {
+      netty.tcp {
+        hostname = my.domain.com      # external (logical) hostname
+        port = 8000                   # external (logical) port
+
+        bind-hostname = local.address # internal (bind) hostname
+        bind-port = 2552              # internal (bind) port
+      }
+   }
+  }

@@ -4,7 +4,7 @@
 
 package akka.cluster
 
-// TODO remove metrics 
+// TODO remove metrics
 
 import java.io.Closeable
 import java.lang.System.{ currentTimeMillis ⇒ newTimestamp }
@@ -13,7 +13,7 @@ import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.concurrent.forkjoin.ThreadLocalRandom
+import java.util.concurrent.ThreadLocalRandom
 import scala.util.{ Try, Success, Failure }
 import akka.ConfigurationException
 import akka.actor.Actor
@@ -24,6 +24,7 @@ import akka.actor.Address
 import akka.actor.DynamicAccess
 import akka.actor.ExtendedActorSystem
 import akka.cluster.MemberStatus.Up
+import akka.cluster.MemberStatus.WeaklyUp
 import akka.event.Logging
 import java.lang.management.MemoryUsage
 
@@ -89,11 +90,14 @@ private[cluster] class ClusterMetricsCollector(publisher: ActorRef) extends Acto
     case msg: MetricsGossipEnvelope ⇒ receiveGossip(msg)
     case state: CurrentClusterState ⇒ receiveState(state)
     case MemberUp(m)                ⇒ addMember(m)
+    case MemberWeaklyUp(m)          ⇒ addMember(m)
     case MemberRemoved(m, _)        ⇒ removeMember(m)
     case MemberExited(m)            ⇒ removeMember(m)
     case UnreachableMember(m)       ⇒ removeMember(m)
-    case ReachableMember(m)         ⇒ if (m.status == Up) addMember(m)
-    case _: MemberEvent             ⇒ // not interested in other types of MemberEvent
+    case ReachableMember(m) ⇒
+      if (m.status == MemberStatus.Up || m.status == MemberStatus.WeaklyUp)
+        addMember(m)
+    case _: MemberEvent ⇒ // not interested in other types of MemberEvent
 
   }
 
@@ -122,7 +126,7 @@ private[cluster] class ClusterMetricsCollector(publisher: ActorRef) extends Acto
    * Updates the initial node ring for those nodes that are [[akka.cluster.MemberStatus]] `Up`.
    */
   def receiveState(state: CurrentClusterState): Unit =
-    nodes = state.members collect { case m if m.status == Up ⇒ m.address }
+    nodes = state.members collect { case m if m.status == Up || m.status == WeaklyUp ⇒ m.address }
 
   /**
    * Samples the latest metrics for the node, updates metrics statistics in
@@ -400,7 +404,7 @@ final case class NodeMetrics(address: Address, timestamp: Long, metrics: Set[Met
     if (timestamp >= that.timestamp) this // that is older
     else {
       // equality is based on the name of the Metric and Set doesn't replace existing element
-      copy(metrics = that.metrics ++ metrics, timestamp = that.timestamp)
+      copy(metrics = that.metrics union metrics, timestamp = that.timestamp)
     }
   }
 
@@ -738,7 +742,7 @@ class SigarMetricsCollector(address: Address, decayFactor: Double, sigar: AnyRef
   }
 
   override def metrics: Set[Metric] = {
-    super.metrics.filterNot(_.name == SystemLoadAverage) ++ Set(systemLoadAverage, cpuCombined).flatten
+    super.metrics.filterNot(_.name == SystemLoadAverage) union Set(systemLoadAverage, cpuCombined).flatten
   }
 
   /**

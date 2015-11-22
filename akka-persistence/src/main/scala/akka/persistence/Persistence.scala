@@ -211,7 +211,7 @@ class Persistence(val system: ExtendedActorSystem) extends Extension {
       case ext if ext(system).actor == journalPluginActor ⇒ ext(system).config
     } match {
       case Some(conf) ⇒ conf
-      case None       ⇒ throw new IllegalArgumentException(s"Unknow plugin actor $journalPluginActor")
+      case None       ⇒ throw new IllegalArgumentException(s"Unknown plugin actor $journalPluginActor")
     }
 
   /**
@@ -253,7 +253,11 @@ class Persistence(val system: ExtendedActorSystem) extends Extension {
 
   private def createPlugin(configPath: String, pluginConfig: Config): ActorRef = {
     val pluginActorName = configPath
-    val pluginClassName = pluginConfig.getString("class")
+    val pluginClassName = pluginConfig.getString("class") match {
+      case "" ⇒ throw new IllegalArgumentException("Plugin class name must be defined in config property " +
+        s"[$configPath.class]")
+      case className ⇒ className
+    }
     log.debug(s"Create plugin: $pluginActorName $pluginClassName")
     val pluginClass = system.dynamicAccess.getClassFor[Any](pluginClassName).get
     val pluginDispatcherId = pluginConfig.getString("plugin-dispatcher")

@@ -12,7 +12,7 @@ import akka.cluster._
 import akka.cluster.protobuf.msg.{ ClusterMessages ⇒ cm }
 import akka.serialization.BaseSerializer
 import akka.util.ClassLoaderObjectInputStream
-import com.google.protobuf.{ ByteString, MessageLite }
+import akka.protobuf.{ ByteString, MessageLite }
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
@@ -168,7 +168,8 @@ class ClusterMessageSerializer(val system: ExtendedActorSystem) extends BaseSeri
     MemberStatus.Leaving -> cm.MemberStatus.Leaving_VALUE,
     MemberStatus.Exiting -> cm.MemberStatus.Exiting_VALUE,
     MemberStatus.Down -> cm.MemberStatus.Down_VALUE,
-    MemberStatus.Removed -> cm.MemberStatus.Removed_VALUE)
+    MemberStatus.Removed -> cm.MemberStatus.Removed_VALUE,
+    MemberStatus.WeaklyUp -> cm.MemberStatus.WeaklyUp_VALUE)
 
   private val memberStatusFromInt = memberStatusToInt.map { case (a, b) ⇒ (b, a) }
 
@@ -194,7 +195,7 @@ class ClusterMessageSerializer(val system: ExtendedActorSystem) extends BaseSeri
     val allMembers = gossip.members.toVector
     val allAddresses: Vector[UniqueAddress] = allMembers.map(_.uniqueAddress)
     val addressMapping = allAddresses.zipWithIndex.toMap
-    val allRoles = allMembers.foldLeft(Set.empty[String])((acc, m) ⇒ acc ++ m.roles).to[Vector]
+    val allRoles = allMembers.foldLeft(Set.empty[String])((acc, m) ⇒ acc union m.roles).to[Vector]
     val roleMapping = allRoles.zipWithIndex.toMap
     val allHashes = gossip.version.versions.keys.to[Vector]
     val hashMapping = allHashes.zipWithIndex.toMap

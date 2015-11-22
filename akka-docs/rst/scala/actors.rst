@@ -283,7 +283,8 @@ that point the appropriate lifecycle events are called and watching actors
 are notified of the termination. After the incarnation is stopped, the path can
 be reused again by creating an actor with ``actorOf()``. In this case the
 name of the new incarnation will be the same as the previous one but the
-UIDs will differ.
+UIDs will differ. An actor can be stopped by the actor itself, another actor
+or the ``ActorSystem`` (see :ref:`stopping-actors-scala`).
 
 An ``ActorRef`` always represents an incarnation (path and UID) not just a
 given path. Therefore if an actor is stopped and a new one with the same
@@ -579,8 +580,8 @@ See :ref:`futures-scala` for more information on how to await or query a
 future.
 
 The ``onComplete``, ``onSuccess``, or ``onFailure`` methods of the ``Future`` can be
-used to register a callback to get a notification when the Future completes.
-Gives you a way to avoid blocking.
+used to register a callback to get a notification when the Future completes, giving
+you a way to avoid blocking.
 
 .. warning::
 
@@ -664,9 +665,11 @@ Stopping actors
 
 Actors are stopped by invoking the :meth:`stop` method of a ``ActorRefFactory``,
 i.e. ``ActorContext`` or ``ActorSystem``. Typically the context is used for stopping
-child actors and the system for stopping top level actors. The actual termination of
-the actor is performed asynchronously, i.e. :meth:`stop` may return before the actor is
-stopped.
+the actor itself or child actors and the system for stopping top level actors. The actual
+termination of the actor is performed asynchronously, i.e. :meth:`stop` may return before
+the actor is stopped.
+
+.. includecode:: code/docs/actor/ActorDocSpec.scala#stoppingActors-actor
 
 Processing of the current message, if any, will continue before the actor is stopped,
 but additional messages in the mailbox will not be processed. By default these
@@ -784,6 +787,7 @@ Encoding Scala Actors nested receives without accidentally leaking memory
 
 See this `Unnested receive example <@github@/akka-docs/rst/scala/code/docs/actor/UnnestedReceives.scala>`_.
 
+.. _stash-scala:
 
 Stash
 =====
@@ -944,7 +948,7 @@ Initialization via preStart
 
 The method ``preStart()`` of an actor is only called once directly during the initialization of the first instance, that
 is, at creation of its ``ActorRef``. In the case of restarts, ``preStart()`` is called from ``postRestart()``, therefore
-if not overridden, ``preStart()`` is called on every incarnation. However, overriding ``postRestart()`` one can disable
+if not overridden, ``preStart()`` is called on every incarnation. However, by overriding ``postRestart()`` one can disable
 this behavior, and ensure that there is only one call to ``preStart()``.
 
 One useful usage of this pattern is to disable creation of new ``ActorRefs`` for children during restarts. This can be

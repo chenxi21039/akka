@@ -56,24 +56,24 @@ abstract class JournalSpec(config: Config) extends PluginSpec(config) {
     ReplayedMessage(PersistentImpl(s"a-${snr}", snr, pid, "", deleted, Actor.noSender, writerUuid))
 
   def writeMessages(fromSnr: Int, toSnr: Int, pid: String, sender: ActorRef, writerUuid: String): Unit = {
+
+    def persistentRepr(sequenceNr: Long) = PersistentRepr(
+      payload = s"a-$sequenceNr", sequenceNr = sequenceNr, persistenceId = pid,
+      sender = sender, writerUuid = writerUuid)
+
     val msgs =
-      if (supportsAtomicPersistAllOfSeveralEvents)
-        (fromSnr to toSnr).map { i ⇒
-          AtomicWrite(PersistentRepr(payload = s"a-$i", sequenceNr = i, persistenceId = pid, sender = sender,
-            writerUuid = writerUuid))
-        }
-      else
+      if (supportsAtomicPersistAllOfSeveralEvents) {
         (fromSnr to toSnr - 1).map { i ⇒
           if (i == toSnr - 1)
-            AtomicWrite(List(
-              PersistentRepr(payload = s"a-$i", sequenceNr = i, persistenceId = pid, sender = sender,
-                writerUuid = writerUuid),
-              PersistentRepr(payload = s"a-${i + 1}", sequenceNr = i + 1, persistenceId = pid, sender = sender,
-                writerUuid = writerUuid)))
+            AtomicWrite(List(persistentRepr(i), persistentRepr(i + 1)))
           else
-            AtomicWrite(PersistentRepr(payload = s"a-${i}", sequenceNr = i, persistenceId = pid, sender = sender,
-              writerUuid = writerUuid))
+            AtomicWrite(persistentRepr(i))
         }
+      } else {
+        (fromSnr to toSnr).map { i ⇒
+          AtomicWrite(persistentRepr(i))
+        }
+      }
 
     val probe = TestProbe()
 
@@ -155,6 +155,31 @@ abstract class JournalSpec(config: Config) extends PluginSpec(config) {
       List(4, 5) foreach { i ⇒ receiverProbe.expectMsg(replayedMessage(i)) }
 
       receiverProbe2.expectNoMsg(200.millis)
+    }
+
+    "not reset highestSequenceNr after message deletion" in {
+      journal ! ReplayMessages(0, Long.MaxValue, Long.MaxValue, pid, receiverProbe.ref)
+      1 to 5 foreach { i ⇒ receiverProbe.expectMsg(replayedMessage(i)) }
+      receiverProbe.expectMsg(RecoverySuccess(highestSequenceNr = 5L))
+
+      journal ! DeleteMessagesTo(pid, 3L, receiverProbe.ref)
+      receiverProbe.expectMsg(DeleteMessagesSuccess(3L))
+
+      journal ! ReplayMessages(0, Long.MaxValue, Long.MaxValue, pid, receiverProbe.ref)
+      4 to 5 foreach { i ⇒ receiverProbe.expectMsg(replayedMessage(i)) }
+      receiverProbe.expectMsg(RecoverySuccess(highestSequenceNr = 5L))
+    }
+
+    "not reset highestSequenceNr after journal cleanup" in {
+      journal ! ReplayMessages(0, Long.MaxValue, Long.MaxValue, pid, receiverProbe.ref)
+      1 to 5 foreach { i ⇒ receiverProbe.expectMsg(replayedMessage(i)) }
+      receiverProbe.expectMsg(RecoverySuccess(highestSequenceNr = 5L))
+
+      journal ! DeleteMessagesTo(pid, Long.MaxValue, receiverProbe.ref)
+      receiverProbe.expectMsg(DeleteMessagesSuccess(Long.MaxValue))
+
+      journal ! ReplayMessages(0, Long.MaxValue, Long.MaxValue, pid, receiverProbe.ref)
+      receiverProbe.expectMsg(RecoverySuccess(highestSequenceNr = 5L))
     }
 
     "reject non-serializable events" in {
