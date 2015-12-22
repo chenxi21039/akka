@@ -74,17 +74,14 @@ public abstract class AbstractNodeQueue<T> extends AtomicReference<AbstractNodeQ
 
     /*
      * Use this method only from the consumer thread!
-     * 
-     * !!! There is a copy of this code in pollNode() !!!
      */
     public final T poll() {
-        final Node<T> next = peekNode();
+        final Node<T> next = pollNode();
         if (next == null) return null;
         else {
-            final T ret = next.value;
-            next.value = null;
-            Unsafe.instance.putOrderedObject(this, tailOffset, next);
-            return ret;
+          T value = next.value;
+          next.value = null;
+          return value;
         }
     }
     
@@ -106,6 +103,7 @@ public abstract class AbstractNodeQueue<T> extends AtomicReference<AbstractNodeQ
         tail.value = next.value;
         next.value = null;
         Unsafe.instance.putOrderedObject(this, tailOffset, next);
+        tail.setNext(null);
         return tail;
       }
     }

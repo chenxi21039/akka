@@ -565,16 +565,39 @@ object MiMa extends AutoPlugin {
 
     Map(
       "2.3.11" -> Seq(
-        ProblemFilters.exclude[MissingMethodProblem]("akka.actor.ActorCell.clearActorFields"), // #17805, incomatibility with 2.4.x fixed in 2.3.12
+        ProblemFilters.exclude[MissingMethodProblem]("akka.actor.ActorCell.clearActorFields"), // #17805, incompatibility with 2.4.x fixed in 2.3.12
         ProblemFilters.exclude[MissingMethodProblem]("akka.japi.Pair.toString") // reported on PR validation machine which uses Java 1.8.0_45
       ),
       "2.3.14" -> bcIssuesBetween23and24,
       "2.4.0" -> Seq(
         FilterAnyProblem("akka.remote.transport.ProtocolStateActor"),
+        FilterAnyProblem("akka.persistence.journal.inmem.InmemJournal"),
+        FilterAnyProblem("akka.persistence.journal.inmem.InmemStore"),
 
         //#18353 Changes to methods and fields private to remoting actors
         ProblemFilters.exclude[MissingMethodProblem]("akka.remote.EndpointManager.retryGateEnabled"),
-        ProblemFilters.exclude[IncompatibleResultTypeProblem]("akka.remote.EndpointManager.pruneTimerCancellable")
+        ProblemFilters.exclude[IncompatibleResultTypeProblem]("akka.remote.EndpointManager.pruneTimerCancellable"),
+        
+        // #18722 internal changes to actor
+        FilterAnyProblem("akka.cluster.sharding.DDataShardCoordinator"),
+
+        // #18328 optimize VersionVector for size 1
+        FilterAnyProblem("akka.cluster.ddata.VersionVector"),
+
+        // #19133 change in internal actor
+        ProblemFilters.exclude[MissingMethodProblem]("akka.remote.ReliableDeliverySupervisor.gated"),
+
+        // debug logging in ReplayFilter, change of internal actor
+        ProblemFilters.exclude[MissingMethodProblem]("akka.persistence.journal.ReplayFilter.this"),
+        ProblemFilters.exclude[MissingMethodProblem]("akka.persistence.journal.AsyncWriteJournal.akka$persistence$journal$AsyncWriteJournal$_setter_$akka$persistence$journal$AsyncWriteJournal$$replayDebugEnabled_="),
+        ProblemFilters.exclude[MissingMethodProblem]("akka.persistence.journal.AsyncWriteJournal.akka$persistence$journal$AsyncWriteJournal$$replayDebugEnabled"),
+        ProblemFilters.exclude[MissingMethodProblem]("akka.persistence.journal.ReplayFilter.props"),
+
+        // report invalid association events #18758
+        ProblemFilters.exclude[MissingTypesProblem]("akka.remote.InvalidAssociation$"),
+        ProblemFilters.exclude[MissingMethodProblem]("akka.remote.InvalidAssociation.apply"),
+        ProblemFilters.exclude[MissingMethodProblem]("akka.remote.InvalidAssociation.copy"),
+        ProblemFilters.exclude[MissingMethodProblem]("akka.remote.InvalidAssociation.this")
       )
     )
   }

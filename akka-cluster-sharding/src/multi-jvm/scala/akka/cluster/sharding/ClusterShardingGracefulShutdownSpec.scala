@@ -3,15 +3,16 @@
  */
 package akka.cluster.sharding
 
+import scala.concurrent.duration._
 import java.io.File
 
 import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.sharding.ShardRegion.GracefulShutdown
 import akka.persistence.Persistence
-import akka.persistence.journal.leveldb.{SharedLeveldbJournal, SharedLeveldbStore}
+import akka.persistence.journal.leveldb.{ SharedLeveldbJournal, SharedLeveldbStore }
 import akka.remote.testconductor.RoleName
-import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec, STMultiNodeSpec}
+import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec, STMultiNodeSpec }
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.io.FileUtils
@@ -49,8 +50,16 @@ object ClusterShardingGracefulShutdownSpec {
         region ! ShardRegion.GracefulShutdown
 
       case Terminated(`region`) ⇒
-        cluster.registerOnMemberRemoved(system.terminate())
+        cluster.registerOnMemberRemoved(self ! "member-removed")
         cluster.leave(cluster.selfAddress)
+
+      case "member-removed" ⇒
+        // Let singletons hand over gracefully before stopping the system
+        import context.dispatcher
+        system.scheduler.scheduleOnce(10.seconds, self, "stop-system")
+
+      case "stop-system" ⇒
+        system.terminate()
     }
   }
   //#graceful-shutdown

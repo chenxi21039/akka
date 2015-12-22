@@ -303,7 +303,7 @@ An example of setting up the default Netty based SSL driver as default::
         key-store-password = "changeme"
         key-password = "changeme"
         trust-store-password = "changeme"
-        protocol = "TLSv1"
+        protocol = "TLSv1.2"
         random-number-generator = "AES128CounterSecureRNG"
         enabled-algorithms = [TLS_RSA_WITH_AES_128_CBC_SHA]
       }
@@ -378,6 +378,9 @@ holds the direction of the association (inbound or outbound), the addresses of t
 
 To be notified  when the remoting subsystem is ready to accept associations, listen to ``RemotingListenEvent`` which
 contains the addresses the remoting listens on.
+
+To be notified when the current system is quarantined by the remote system, listen to ``ThisActorSystemQuarantinedEvent``,
+which includes the addresses of local and remote ActorSystems.
 
 To be notified  when the remoting subsystem has been shut down, listen to ``RemotingShutdownEvent``.
 

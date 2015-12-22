@@ -129,8 +129,11 @@ private[remote] final case class ShutDownAssociation(localAddress: Address, remo
 /**
  * INTERNAL API
  */
-@SerialVersionUID(1L)
-private[remote] final case class InvalidAssociation(localAddress: Address, remoteAddress: Address, cause: Throwable)
+@SerialVersionUID(2L)
+private[remote] final case class InvalidAssociation(localAddress: Address,
+                                                    remoteAddress: Address,
+                                                    cause: Throwable,
+                                                    disassociationInfo: Option[DisassociateInfo] = None)
   extends EndpointException("Invalid address: " + remoteAddress, cause) with AssociationProblem
 
 /**
@@ -213,7 +216,7 @@ private[remote] class ReliableDeliverySupervisor(
       if (bufferWasInUse) {
         if ((resendBuffer.nacked.nonEmpty || resendBuffer.nonAcked.nonEmpty) && bailoutAt.isEmpty)
           bailoutAt = Some(Deadline.now + settings.InitialSysMsgDeliveryTimeout)
-        context.become(gated)
+        context.become(gated(writerTerminated = false, earlyUngateRequested = false))
         currentHandle = None
         context.parent ! StoppedReading(self)
         Stop
@@ -312,12 +315,19 @@ private[remote] class ReliableDeliverySupervisor(
       writer forward s
   }
 
-  def gated: Receive = {
-    case Terminated(_) ⇒
-      context.system.scheduler.scheduleOnce(settings.RetryGateClosedFor, self, Ungate)
+  def gated(writerTerminated: Boolean, earlyUngateRequested: Boolean): Receive = {
+    case Terminated(_) if !writerTerminated ⇒
+      if (earlyUngateRequested)
+        self ! Ungate
+      else
+        context.system.scheduler.scheduleOnce(settings.RetryGateClosedFor, self, Ungate)
+      context.become(gated(writerTerminated = true, earlyUngateRequested))
     case IsIdle ⇒ sender() ! Idle
     case Ungate ⇒
-      if (resendBuffer.nonAcked.nonEmpty || resendBuffer.nacked.nonEmpty) {
+      if (!writerTerminated) {
+        // Ungate was sent from EndpointManager, but we must wait for Terminated first.
+        context.become(gated(writerTerminated = false, earlyUngateRequested = true))
+      } else if (resendBuffer.nonAcked.nonEmpty || resendBuffer.nacked.nonEmpty) {
         // If we talk to a system we have not talked to before (or has given up talking to in the past) stop
         // system delivery attempts after the specified time. This act will drop the pending system messages and gate the
         // remote address at the EndpointManager level stopping this actor. In case the remote system becomes reachable
@@ -993,7 +1003,8 @@ private[remote] class EndpointReader(
         localAddress,
         remoteAddress,
         InvalidAssociationException("The remote system has quarantined this system. No further associations " +
-          "to the remote system are possible until this system is restarted."))
+          "to the remote system are possible until this system is restarted."),
+        Some(AssociationHandle.Quarantined))
   }
 
   private def deliverAndAck(): Unit = {
