@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -105,6 +105,10 @@ final class ClusterSettings(val config: Config, val systemName: String) {
   val MetricsMovingAverageHalfLife: FiniteDuration = {
     cc.getMillisDuration("metrics.moving-average-half-life")
   } requiring (_ > Duration.Zero, "metrics.moving-average-half-life must be > 0")
+
+  object Debug {
+    val VerboseHeartbeatLogging = cc.getBoolean("debug.verbose-heartbeat-logging")
+  }
 
 }
 

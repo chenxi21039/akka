@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2015 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2015-2016 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.persistence.query.journal.leveldb
 
@@ -120,7 +120,7 @@ class EventsByPersistenceIdSpec extends AkkaSpec(EventsByPersistenceIdSpec.confi
       expectMsg(s"${2L}-deleted")
 
       val src = queries.currentEventsByPersistenceId("h", 0L, Long.MaxValue)
-      src.map(_.event).runWith(TestSink.probe[Any]).request(1).expectNext("h-3") expectComplete()
+      src.map(_.event).runWith(TestSink.probe[Any]).request(1).expectNext("h-3").expectComplete()
     }
 
     "return empty stream for empty journal" in {

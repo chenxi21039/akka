@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package docs.persistence
 
 import akka.actor._
-import akka.pattern.BackoffSupervisor
+import akka.pattern.{ Backoff, BackoffSupervisor }
 import akka.persistence._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{ Source, Sink, Flow }
@@ -85,17 +85,18 @@ object PersistenceDocSpec {
     }
   }
 
-  object Backoff {
+  object BackoffOnStop {
     abstract class MyActor extends Actor {
       import PersistAsync.MyPersistentActor
       //#backoff
       val childProps = Props[MyPersistentActor]
       val props = BackoffSupervisor.props(
-        childProps,
-        childName = "myActor",
-        minBackoff = 3.seconds,
-        maxBackoff = 30.seconds,
-        randomFactor = 0.2)
+        Backoff.onStop(
+          childProps,
+          childName = "myActor",
+          minBackoff = 3.seconds,
+          maxBackoff = 30.seconds,
+          randomFactor = 0.2))
       context.actorOf(props, name = "mySupervisor")
       //#backoff
     }
@@ -391,7 +392,6 @@ object PersistenceDocSpec {
     // order of received messages:
     // a
     //   # b arrives at mailbox, stashing;        internal-stash = [b]
-    //   # PoisonPill arrives at mailbox, stashing; internal-stash = [b, Shutdown]
     // PoisonPill is an AutoReceivedMessage, is handled automatically
     // !! stop !!
     // Actor is stopped without handling `b` nor the `a` handler!

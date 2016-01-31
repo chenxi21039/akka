@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.pattern
 
@@ -120,7 +120,7 @@ class AskSpec extends AkkaSpec with ScalaFutures {
     }
 
     "work when reply uses actor selection" in {
-      implicit val timeout = Timeout(0.5 seconds)
+      implicit val timeout = Timeout(5 seconds)
       val deadListener = TestProbe()
       system.eventStream.subscribe(deadListener.ref, classOf[DeadLetter])
 

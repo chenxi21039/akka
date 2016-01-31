@@ -10,17 +10,17 @@ In case of questions about the contribution process or for discussion of specifi
 
 # Typesafe Project & Developer Guidelines
 
-These guidelines are meant to be a living document that should be changed and adapted as needed. We encourage changes that makes it easier to achieve our goals in an efficient way.
+These guidelines are meant to be a living document that should be changed and adapted as needed. We encourage changes that make it easier to achieve our goals in an efficient way.
 
-These guidelines mainly applies to Typesafe’s “mature” projects - not necessarily to projects of the type ‘collection of scripts’ etc.
+These guidelines mainly apply to Typesafe’s “mature” projects - not necessarily to projects of the type ‘collection of scripts’ etc.
 
 ## Branches summary
 
 Depending on which version (or sometimes module) you want to work on, you should target a specific branch as explained below:
 
-* `master` – development branch of Akka 2.4.x
+* `master` – active development branch of Akka 2.4.x
 * `release-2.3` – maintanance branch of Akka 2.3.x
-* `release 2.3-dev` – development branch of Akka Streams and HTTP (only)
+* similarily `release-2.#` branches contain legacy versions of Akka
 
 ## General Workflow
 
@@ -51,6 +51,31 @@ This is the process for committing code into master. There are of course excepti
     Please mark these pull requests with `(for validation)` in the title to make the purpose clear in the pull request list.
 
 9. Once everything is said and done, associate the ticket with the “earliest” release milestone (i.e. if back-ported so that it will be in release x.y.z, find the relevant milestone for that release) and close it.
+
+## The `validatePullRequest` task
+
+The Akka build includes a special task called `validatePullRequest` which investigates the changes made as well as dirty
+(uncommitted changes) in your local working directory and figures out which projects are impacted by those changes,
+then running tests only on those projects.
+
+For example changing something in `akka-http-core` would cause tests to be run in all projects which depend on it
+(e.g. `akka-http-core-tests`, `akka-http-marshallers-*`, `akka-docs` etc.).
+
+To use the task simply type, and the output should include entries like shown below:
+
+```
+> validatePullRequest
+[info] Diffing [HEAD] to determine changed modules in PR...
+[info] Detected uncomitted changes in directories (including in dependency analysis): [akka-protobuf,project]
+[info] Detected changes in directories: [akka-docs, project, akka-http-tests, akka-protobuf, akka-http-testkit, akka-http, akka-http-core, akka-stream]
+```
+
+By default changes are diffed with the `master` branch when working locally, if you want to validate against a different
+target PR branch you can do so by setting the PR_TARGET_BRANCH environment variable for SBT:
+
+```
+PR_TARGET_BRANCH=origin/example sbt validatePullRequest
+```
 
 ## Pull Request Requirements
 
@@ -114,11 +139,11 @@ Which licenses are compatible with Apache 2 are defined in [this doc](http://www
 
 > Each license in this category requires some degree of [reciprocity](http://www.apache.org/legal/3party.html#define-reciprocal); therefore, additional action must be taken in order to minimize the chance that a user of an Apache product will create a derivative work of a reciprocally-licensed portion of an Apache product without being aware of the applicable requirements.
 
-Each project must also create and maintain a list of all dependencies and their licenses, including all their transitive dependencies. This can be done in either in the documentation or in the build file next to each dependency.
+Each project must also create and maintain a list of all dependencies and their licenses, including all their transitive dependencies. This can be done either in the documentation or in the build file next to each dependency.
 
 ## Work In Progress
 
-It is ok to work on a public feature branch in the GitHub repository. Something that can sometimes be useful for early feedback etc. If so then it is preferable to name the branch accordingly. This can be done by either prefix the name with ``wip-`` as in ‘Work In Progress’, or use hierarchical names like ``wip/..``, ``feature/..`` or ``topic/..``. Either way is fine as long as it is clear that it is work in progress and not ready for merge. This work can temporarily have a lower standard. However, to be merged into master it will have to go through the regular process outlined above, with Pull Request, review etc..
+It is ok to work on a public feature branch in the GitHub repository. Something that can sometimes be useful for early feedback etc. If so, then it is preferable to name the branch accordingly. This can be done by either prefixing the name with ``wip-`` as in ‘Work In Progress’, or using hierarchical names like ``wip/..``, ``feature/..`` or ``topic/..``. Either way is fine as long as it is clear that it is work in progress and not ready for merge. This work can temporarily have a lower standard. However, to be merged into master it will have to go through the regular process outlined above, with Pull Request, review etc..
 
 Also, to facilitate both well-formed commits and working together, the ``wip`` and ``feature``/``topic`` identifiers also have special meaning.   Any branch labelled with ``wip`` is considered “git-unstable” and may be rebased and have its history rewritten.   Any branch with ``feature``/``topic`` in the name is considered “stable” enough for others to depend on when a group is working on a feature.
 
@@ -126,7 +151,7 @@ Also, to facilitate both well-formed commits and working together, the ``wip`` a
 
 Follow these guidelines when creating public commits and writing commit messages.
 
-1. If your work spans multiple local commits (for example; if you do safe point commits while working in a feature branch or work in a branch for long time doing merges/rebases etc.) then please do not commit it all but rewrite the history by squashing the commits into a single big commit which you write a good commit message for (like discussed in the following sections). For more info read this article: [Git Workflow](http://sandofsky.com/blog/git-workflow.html). Every commit should be able to be used in isolation, cherry picked etc.
+1. If your work spans multiple local commits (for example; if you do safe point commits while working in a feature branch or work in a branch for a long time doing merges/rebases etc.) then please do not commit it all but rewrite the history by squashing the commits into a single big commit which you write a good commit message for (like discussed in the following sections). For more info read this article: [Git Workflow](http://sandofsky.com/blog/git-workflow.html). Every commit should be able to be used in isolation, cherry picked etc.
 
 2. First line should be a descriptive sentence what the commit is doing. It should be possible to fully understand what the commit does—but not necessarily how it does it—by just reading this single line. We follow the “imperative present tense” style for commit messages ([more info here](http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html)).
 
