@@ -14,6 +14,7 @@ import java.util.stream.DoubleStream;
 import java.util.stream.Stream;
 
 import akka.NotUsed;
+import docs.AbstractJavaTest;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -36,22 +37,23 @@ import scala.concurrent.Future;
 import scala.concurrent.duration.Duration;
 import scala.util.Random;
 
-public class RateTransformationDocTest {
+public class RateTransformationDocTest extends AbstractJavaTest {
 
-  private static ActorSystem system;
+  static ActorSystem system;
+  static Materializer mat;
 
   @BeforeClass
   public static void setup() {
     system = ActorSystem.create("RateTransformationDocTest");
+    mat = ActorMaterializer.create(system);
   }
 
   @AfterClass
   public static void tearDown() {
     JavaTestKit.shutdownActorSystem(system);
     system = null;
+    mat = null;
   }
-
-  final Materializer mat = ActorMaterializer.create(system);
 
   final Random r = new Random();
 
@@ -60,7 +62,7 @@ public class RateTransformationDocTest {
     //#conflate-summarize
     final Flow<Double, Tuple3<Double, Double, Integer>, NotUsed> statsFlow =
       Flow.of(Double.class)
-        .conflate(elem -> Collections.singletonList(elem), (acc, elem) -> {
+        .conflateWithSeed(elem -> Collections.singletonList(elem), (acc, elem) -> {
           return Stream
             .concat(acc.stream(), Collections.singletonList(elem).stream())
             .collect(Collectors.toList());
@@ -86,7 +88,7 @@ public class RateTransformationDocTest {
     //#conflate-sample
     final Double p = 0.01;
     final Flow<Double, Double, NotUsed> sampleFlow = Flow.of(Double.class)
-      .conflate(elem -> Collections.singletonList(elem), (acc, elem) -> {
+      .conflateWithSeed(elem -> Collections.singletonList(elem), (acc, elem) -> {
         if (r.nextDouble() < p) {
           return Stream
             .concat(acc.stream(), Collections.singletonList(elem).stream())

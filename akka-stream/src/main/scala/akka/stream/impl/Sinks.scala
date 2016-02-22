@@ -8,10 +8,12 @@ import akka.{ Done, NotUsed }
 import akka.actor.{ ActorRef, Props }
 import akka.stream.Attributes.InputBuffer
 import akka.stream._
+import akka.stream.impl.Stages.DefaultAttributes
 import akka.stream.impl.StreamLayout.Module
 import akka.stream.stage._
 import org.reactivestreams.{ Publisher, Subscriber }
 import scala.annotation.unchecked.uncheckedVariance
+import scala.collection.immutable
 import scala.concurrent.{ Future, Promise }
 import scala.language.postfixOps
 import scala.util.{ Failure, Success, Try }
@@ -29,8 +31,8 @@ private[akka] abstract class SinkModule[-In, Mat](val shape: SinkShape[In]) exte
   def create(context: MaterializationContext): (Subscriber[In] @uncheckedVariance, Mat)
 
   override def replaceShape(s: Shape): Module =
-    if (s == shape) this
-    else throw new UnsupportedOperationException("cannot replace the shape of a Sink, you need to wrap it in a Graph for that")
+    if (s != shape) throw new UnsupportedOperationException("cannot replace the shape of a Sink, you need to wrap it in a Graph for that")
+    else this
 
   // This is okay since we the only caller of this method is right below.
   protected def newInstance(s: SinkShape[In] @uncheckedVariance): SinkModule[In, Mat]
@@ -242,27 +244,68 @@ private[akka] final class HeadOptionStage[T] extends GraphStageWithMaterializedV
   override def toString: String = "HeadOptionStage"
 }
 
+private[akka] final class SeqStage[T] extends GraphStageWithMaterializedValue[SinkShape[T], Future[immutable.Seq[T]]] {
+  val in = Inlet[T]("seq.in")
+
+  override val shape: SinkShape[T] = SinkShape.of(in)
+
+  override protected def initialAttributes: Attributes = DefaultAttributes.seqSink
+
+  override def createLogicAndMaterializedValue(inheritedAttributes: Attributes) = {
+    val p: Promise[immutable.Seq[T]] = Promise()
+    val logic = new GraphStageLogic(shape) {
+      val buf = Vector.newBuilder[T]
+
+      override def preStart(): Unit = pull(in)
+
+      setHandler(in, new InHandler {
+
+        override def onPush(): Unit = {
+          buf += grab(in)
+          pull(in)
+        }
+
+        override def onUpstreamFinish(): Unit = {
+          val result = buf.result()
+          p.trySuccess(result)
+          completeStage()
+        }
+
+        override def onUpstreamFailure(ex: Throwable): Unit = {
+          p.tryFailure(ex)
+          failStage(ex)
+        }
+      })
+    }
+
+    (logic, p.future)
+  }
+}
+
 /**
  * INTERNAL API
  */
-private[akka] class QueueSink[T]() extends GraphStageWithMaterializedValue[SinkShape[T], SinkQueue[T]] {
+final private[stream] class QueueSink[T]() extends GraphStageWithMaterializedValue[SinkShape[T], SinkQueue[T]] {
   type Requested[E] = Promise[Option[E]]
 
   val in = Inlet[T]("queueSink.in")
+  override def initialAttributes = DefaultAttributes.queueSink
   override val shape: SinkShape[T] = SinkShape.of(in)
 
   override def createLogicAndMaterializedValue(inheritedAttributes: Attributes) = {
-    type Received[E] = Try[Option[E]]
-
-    val maxBuffer = module.attributes.getAttribute(classOf[InputBuffer], InputBuffer(16, 16)).max
-    require(maxBuffer > 0, "Buffer size must be greater than 0")
-
-    val buffer = FixedSizeBuffer[Received[T]](maxBuffer + 1)
-    var currentRequest: Option[Requested[T]] = None
-
     val stageLogic = new GraphStageLogic(shape) with CallbackWrapper[Requested[T]] {
+      type Received[E] = Try[Option[E]]
+
+      val maxBuffer = inheritedAttributes.getAttribute(classOf[InputBuffer], InputBuffer(16, 16)).max
+      require(maxBuffer > 0, "Buffer size must be greater than 0")
+
+      var buffer: Buffer[Received[T]] = _
+      var currentRequest: Option[Requested[T]] = None
 
       override def preStart(): Unit = {
+        // Allocates one additional element to hold stream
+        // closed/failure indicators
+        buffer = Buffer(maxBuffer + 1, materializer)
         setKeepGoing(true)
         initCallback(callback.invoke)
         pull(in)
@@ -277,7 +320,10 @@ private[akka] class QueueSink[T]() extends GraphStageWithMaterializedValue[SinkS
             promise.failure(new IllegalStateException("You have to wait for previous future to be resolved to send another request"))
           case None ⇒
             if (buffer.isEmpty) currentRequest = Some(promise)
-            else sendDownstream(promise)
+            else {
+              if (buffer.used == maxBuffer) tryPull(in)
+              sendDownstream(promise)
+            }
         })
 
       def sendDownstream(promise: Requested[T]): Unit = {
@@ -303,7 +349,7 @@ private[akka] class QueueSink[T]() extends GraphStageWithMaterializedValue[SinkS
       setHandler(in, new InHandler {
         override def onPush(): Unit = {
           enqueueAndNotify(Success(Some(grab(in))))
-          if (buffer.used < maxBuffer - 1) pull(in)
+          if (buffer.used < maxBuffer) pull(in)
         }
         override def onUpstreamFinish(): Unit = enqueueAndNotify(Success(None))
         override def onUpstreamFailure(ex: Throwable): Unit = enqueueAndNotify(Failure(ex))

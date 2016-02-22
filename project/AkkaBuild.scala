@@ -55,7 +55,8 @@ object AkkaBuild extends Build {
     ),
     aggregate = Seq(actor, testkit, actorTests, remote, remoteTests, camel,
       cluster, clusterMetrics, clusterTools, clusterSharding, distributedData,
-      slf4j, agent, persistence, persistenceQuery, persistenceTck, kernel, osgi, docs, contrib, samples, multiNodeTestkit, benchJmh, typed, protobuf,
+      slf4j, agent, persistence, persistenceQuery, persistenceTck, persistenceShared,
+      kernel, osgi, docs, contrib, samples, multiNodeTestkit, benchJmh, typed, protobuf,
       stream, streamTestkit, streamTests, streamTestsTck, parsing,
       httpCore, http, httpSprayJson, httpXml, httpJackson, httpTests, httpTestkit
     )
@@ -68,7 +69,8 @@ object AkkaBuild extends Build {
     // samples don't work with dbuild right now
     aggregate = Seq(actor, testkit, actorTests, remote, remoteTests, camel,
       cluster, clusterMetrics, clusterTools, clusterSharding, distributedData,
-      slf4j, persistence, persistenceQuery, persistenceTck, kernel, osgi, contrib, multiNodeTestkit, benchJmh, typed, protobuf,
+      slf4j, persistence, persistenceQuery, persistenceTck, persistenceShared,
+      kernel, osgi, contrib, multiNodeTestkit, benchJmh, typed, protobuf,
       stream, streamTestkit, streamTests, streamTestsTck, parsing,
       httpCore, http, httpSprayJson, httpXml, httpJackson, httpTests, httpTestkit
     )
@@ -181,7 +183,7 @@ object AkkaBuild extends Build {
   lazy val persistence = Project(
     id = "akka-persistence",
     base = file("akka-persistence"),
-    dependencies = Seq(actor, remote % "test->test", testkit % "test->test", protobuf)
+    dependencies = Seq(actor, testkit % "test->test", protobuf)
   )
 
   lazy val persistenceQuery = Project(
@@ -200,6 +202,12 @@ object AkkaBuild extends Build {
     dependencies = Seq(persistence % "compile;provided->provided;test->test", testkit % "compile;test->test")
   )
 
+  lazy val persistenceShared = Project(
+    id = "akka-persistence-shared",
+    base = file("akka-persistence-shared"),
+    dependencies = Seq(persistence % "test->test", testkit % "test->test", remote % "test", protobuf)
+  )
+
   lazy val httpCore = Project(
     id = "akka-http-core",
     base = file("akka-http-core"),
@@ -213,13 +221,13 @@ object AkkaBuild extends Build {
   )
 
   lazy val httpTestkit = Project(
-    id = "akka-http-testkit-experimental",
+    id = "akka-http-testkit",
     base = file("akka-http-testkit"),
     dependencies = Seq(http, streamTestkit)
   )
 
   lazy val httpTests = Project(
-    id = "akka-http-tests-experimental",
+    id = "akka-http-tests",
     base = file("akka-http-tests"),
     dependencies = Seq(httpTestkit % "test", httpSprayJson, httpXml, httpJackson)
   )
@@ -272,18 +280,18 @@ object AkkaBuild extends Build {
 
   lazy val streamTestkit = Project(
     id = "akka-stream-testkit",
-    base = file("akka-stream-testkit"), // TODO that persistence dependency
-    dependencies = Seq(stream, persistence % "compile;provided->provided;test->test", testkit % "compile;test->test")
+    base = file("akka-stream-testkit"),
+    dependencies = Seq(stream, testkit % "compile;test->test")
   )
 
   lazy val streamTests = Project(
-    id = "akka-stream-tests-experimental",
+    id = "akka-stream-tests",
     base = file("akka-stream-tests"),
     dependencies = Seq(streamTestkit % "test->test", stream)
   )
 
   lazy val streamTestsTck = Project(
-    id = "akka-stream-tests-tck-experimental",
+    id = "akka-stream-tests-tck",
     base = file("akka-stream-tests-tck"),
     dependencies = Seq(streamTestkit % "test->test", stream)
   )

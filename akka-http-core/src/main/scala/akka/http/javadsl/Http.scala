@@ -6,13 +6,12 @@ package akka.http.javadsl
 
 import java.net.InetSocketAddress
 import java.util.Optional
-import akka.http.impl.settings.HostConnectionPoolSetup
 import akka.http.impl.util.JavaMapping
 import akka.http.impl.util.JavaMapping.HttpsConnectionContext
 import akka.http.javadsl.model.ws._
 import akka.http.javadsl.settings.{ ConnectionPoolSettings, ClientConnectionSettings, ServerSettings }
 import akka.{ NotUsed, stream }
-import akka.stream.io.{ SslTlsInbound, SslTlsOutbound }
+import akka.stream.TLSProtocol._
 import scala.language.implicitConversions
 import scala.concurrent.Future
 import scala.util.Try
@@ -84,17 +83,24 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
   /**
    * Creates a [[Source]] of [[IncomingConnection]] instances which represents a prospective HTTP server binding
    * on the given `endpoint`.
+   *
    * If the given port is 0 the resulting source can be materialized several times. Each materialization will
    * then be assigned a new local port by the operating system, which can then be retrieved by the materialized
    * [[ServerBinding]].
+   *
    * If the given port is non-zero subsequent materialization attempts of the produced source will immediately
    * fail, unless the first materialization has already been unbound. Unbinding can be triggered via the materialized
    * [[ServerBinding]].
+   *
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
-  def bind(interface: String, port: Int, materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] =
-    new Source(delegate.bind(interface, port)(materializer)
+  def bind(connect: ConnectHttp, materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
+    new Source(delegate.bind(connect.host, connect.port, connectionContext)(materializer)
       .map(new IncomingConnection(_))
       .mapMaterializedValue(_.map(new ServerBinding(_))(ec).toJava))
+  }
 
   /**
    * Creates a [[Source]] of [[IncomingConnection]] instances which represents a prospective HTTP server binding
@@ -107,14 +113,18 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    * If the given port is non-zero subsequent materialization attempts of the produced source will immediately
    * fail, unless the first materialization has already been unbound. Unbinding can be triggered via the materialized
    * [[ServerBinding]].
+   *
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
-  def bind(interface: String, port: Int,
-           connectionContext: ConnectionContext,
+  def bind(connect: ConnectHttp,
            settings: ServerSettings,
-           materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] =
-    new Source(delegate.bind(interface, port, settings = settings.asScala, connectionContext = ConnectionContext.noEncryption().asScala)(materializer)
+           materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
+    new Source(delegate.bind(connect.host, connect.port, settings = settings.asScala, connectionContext = connectionContext)(materializer)
       .map(new IncomingConnection(_))
       .mapMaterializedValue(_.map(new ServerBinding(_))(ec).toJava))
+  }
 
   /**
    * Creates a [[Source]] of [[IncomingConnection]] instances which represents a prospective HTTP server binding
@@ -127,34 +137,19 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    * If the given port is non-zero subsequent materialization attempts of the produced source will immediately
    * fail, unless the first materialization has already been unbound. Unbinding can be triggered via the materialized
    * [[ServerBinding]].
-   */
-  def bind(interface: String, port: Int,
-           connectionContext: ConnectionContext,
-           materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] =
-    new Source(delegate.bind(interface, port, connectionContext = connectionContext.asScala)(materializer)
-      .map(new IncomingConnection(_))
-      .mapMaterializedValue(_.map(new ServerBinding(_))(ec).toJava))
-
-  /**
-   * Creates a [[Source]] of [[IncomingConnection]] instances which represents a prospective HTTP server binding
-   * on the given `endpoint`.
    *
-   * If the given port is 0 the resulting source can be materialized several times. Each materialization will
-   * then be assigned a new local port by the operating system, which can then be retrieved by the materialized
-   * [[ServerBinding]].
-   *
-   * If the given port is non-zero subsequent materialization attempts of the produced source will immediately
-   * fail, unless the first materialization has already been unbound. Unbinding can be triggered via the materialized
-   * [[ServerBinding]].
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
-  def bind(interface: String, port: Int,
-           connectionContext: ConnectionContext,
+  def bind(connect: ConnectHttp,
            settings: ServerSettings,
            log: LoggingAdapter,
-           materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] =
-    new Source(delegate.bind(interface, port, ConnectionContext.noEncryption().asScala, settings.asScala, log)(materializer)
+           materializer: Materializer): Source[IncomingConnection, CompletionStage[ServerBinding]] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
+    new Source(delegate.bind(connect.host, connect.port, connectionContext, settings.asScala, log)(materializer)
       .map(new IncomingConnection(_))
       .mapMaterializedValue(_.map(new ServerBinding(_))(ec).toJava))
+  }
 
   /**
    * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
@@ -162,13 +157,18 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    *
    * The number of concurrently accepted connections can be configured by overriding
    * the `akka.http.server.max-connections` setting.
+   *
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
   def bindAndHandle(handler: Flow[HttpRequest, HttpResponse, _],
-                    interface: String, port: Int,
-                    materializer: Materializer): CompletionStage[ServerBinding] =
+                    connect: ConnectHttp,
+                    materializer: Materializer): CompletionStage[ServerBinding] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
     delegate.bindAndHandle(handler.asInstanceOf[Flow[sm.HttpRequest, sm.HttpResponse, _]].asScala,
-      interface, port)(materializer)
+      connect.host, connect.port, connectionContext)(materializer)
       .map(new ServerBinding(_))(ec).toJava
+  }
 
   /**
    * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
@@ -176,31 +176,20 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    *
    * The number of concurrently accepted connections can be configured by overriding
    * the `akka.http.server.max-connections` setting.
-   */
-  def bindAndHandle(handler: Flow[HttpRequest, HttpResponse, _],
-                    interface: String, port: Int,
-                    connectionContext: ConnectionContext,
-                    materializer: Materializer): CompletionStage[ServerBinding] =
-    delegate.bindAndHandle(handler.asInstanceOf[Flow[sm.HttpRequest, sm.HttpResponse, _]].asScala,
-      interface, port, connectionContext.asScala)(materializer)
-      .map(new ServerBinding(_))(ec).toJava
-
-  /**
-   * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
-   * [[Flow]] for processing all incoming connections.
    *
-   * The number of concurrently accepted connections can be configured by overriding
-   * the `akka.http.server.max-connections` setting.
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
   def bindAndHandle(handler: Flow[HttpRequest, HttpResponse, _],
-                    interface: String, port: Int,
+                    connect: ConnectHttp,
                     settings: ServerSettings,
-                    connectionContext: ConnectionContext,
                     log: LoggingAdapter,
-                    materializer: Materializer): CompletionStage[ServerBinding] =
+                    materializer: Materializer): CompletionStage[ServerBinding] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
     delegate.bindAndHandle(handler.asInstanceOf[Flow[sm.HttpRequest, sm.HttpResponse, _]].asScala,
-      interface, port, connectionContext.asScala, settings.asScala, log)(materializer)
+      connect.host, connect.port, connectionContext, settings.asScala, log)(materializer)
       .map(new ServerBinding(_))(ec).toJava
+  }
 
   /**
    * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
@@ -208,12 +197,17 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    *
    * The number of concurrently accepted connections can be configured by overriding
    * the `akka.http.server.max-connections` setting.
+   *
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
   def bindAndHandleSync(handler: Function[HttpRequest, HttpResponse],
-                        interface: String, port: Int,
-                        materializer: Materializer): CompletionStage[ServerBinding] =
-    delegate.bindAndHandleSync(handler.apply(_).asScala, interface, port)(materializer)
+                        connect: ConnectHttp,
+                        materializer: Materializer): CompletionStage[ServerBinding] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
+    delegate.bindAndHandleSync(handler.apply(_).asScala, connect.host, connect.port, connectionContext)(materializer)
       .map(new ServerBinding(_))(ec).toJava
+  }
 
   /**
    * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
@@ -221,30 +215,20 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    *
    * The number of concurrently accepted connections can be configured by overriding
    * the `akka.http.server.max-connections` setting.
-   */
-  def bindAndHandleSync(handler: Function[HttpRequest, HttpResponse],
-                        interface: String, port: Int,
-                        connectionContext: ConnectionContext,
-                        materializer: Materializer): CompletionStage[ServerBinding] =
-    delegate.bindAndHandleSync(handler.apply(_).asScala, interface, port, connectionContext.asScala)(materializer)
-      .map(new ServerBinding(_))(ec).toJava
-
-  /**
-   * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
-   * [[Flow]] for processing all incoming connections.
    *
-   * The number of concurrently accepted connections can be configured by overriding
-   * the `akka.http.server.max-connections` setting.
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
   def bindAndHandleSync(handler: Function[HttpRequest, HttpResponse],
-                        interface: String, port: Int,
+                        connect: ConnectHttp,
                         settings: ServerSettings,
-                        connectionContext: ConnectionContext,
                         log: LoggingAdapter,
-                        materializer: Materializer): CompletionStage[ServerBinding] =
+                        materializer: Materializer): CompletionStage[ServerBinding] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
     delegate.bindAndHandleSync(handler.apply(_).asScala,
-      interface, port, connectionContext.asScala, settings.asScala, log)(materializer)
+      connect.host, connect.port, connectionContext, settings.asScala, log)(materializer)
       .map(new ServerBinding(_))(ec).toJava
+  }
 
   /**
    * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
@@ -252,12 +236,17 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    *
    * The number of concurrently accepted connections can be configured by overriding
    * the `akka.http.server.max-connections` setting.
+   *
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
   def bindAndHandleAsync(handler: Function[HttpRequest, CompletionStage[HttpResponse]],
-                         interface: String, port: Int,
-                         materializer: Materializer): CompletionStage[ServerBinding] =
-    delegate.bindAndHandleAsync(handler.apply(_).toScala, interface, port)(materializer)
+                         connect: ConnectHttp,
+                         materializer: Materializer): CompletionStage[ServerBinding] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
+    delegate.bindAndHandleAsync(handler.apply(_).toScala, connect.host, connect.port, connectionContext)(materializer)
       .map(new ServerBinding(_))(ec).toJava
+  }
 
   /**
    * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
@@ -265,29 +254,20 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    *
    * The number of concurrently accepted connections can be configured by overriding
    * the `akka.http.server.max-connections` setting.
-   */
-  def bindAndHandleAsync(handler: Function[HttpRequest, CompletionStage[HttpResponse]],
-                         interface: String, port: Int,
-                         connectionContext: ConnectionContext,
-                         materializer: Materializer): CompletionStage[ServerBinding] =
-    delegate.bindAndHandleAsync(handler.apply(_).toScala, interface, port, connectionContext.asScala)(materializer)
-      .map(new ServerBinding(_))(ec).toJava
-
-  /**
-   * Convenience method which starts a new HTTP server at the given endpoint and uses the given `handler`
-   * [[Flow]] for processing all incoming connections.
    *
-   * The number of concurrently accepted connections can be configured by overriding
-   * the `akka.http.server.max-connections` setting.
+   * The server will be bound using HTTPS if the [[ConnectHttp]] object is configured with an [[HttpsConnectionContext]],
+   * or the [[defaultServerHttpContext]] has been configured to be an [[HttpsConnectionContext]].
    */
   def bindAndHandleAsync(handler: Function[HttpRequest, CompletionStage[HttpResponse]],
-                         interface: String, port: Int,
-                         settings: ServerSettings, connectionContext: ConnectionContext,
+                         connect: ConnectHttp,
+                         settings: ServerSettings,
                          parallelism: Int, log: LoggingAdapter,
-                         materializer: Materializer): CompletionStage[ServerBinding] =
+                         materializer: Materializer): CompletionStage[ServerBinding] = {
+    val connectionContext = connect.effectiveConnectionContext(defaultServerHttpContext).asScala
     delegate.bindAndHandleAsync(handler.apply(_).toScala,
-      interface, port, connectionContext.asScala, settings.asScala, parallelism, log)(materializer)
+      connect.host, connect.port, connectionContext, settings.asScala, parallelism, log)(materializer)
       .map(new ServerBinding(_))(ec).toJava
+  }
 
   /**
    * Constructs a client layer stage using the configured default [[akka.http.javadsl.settings.ClientConnectionSettings]].
@@ -327,7 +307,7 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    */
   def outgoingConnection(to: ConnectHttp): Flow[HttpRequest, HttpResponse, CompletionStage[OutgoingConnection]] =
     adaptOutgoingFlow {
-      if (to.isHttps) delegate.outgoingConnectionHttps(to.host, to.port, to.effectiveConnectionContext(defaultClientHttpsContext).asScala)
+      if (to.isHttps) delegate.outgoingConnectionHttps(to.host, to.port, to.effectiveHttpsConnectionContext(defaultClientHttpsContext).asScala)
       else delegate.outgoingConnection(to.host, to.port)
     }
 
@@ -335,16 +315,15 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    * Creates a [[Flow]] representing a prospective HTTP client connection to the given endpoint.
    * Every materialization of the produced flow will attempt to establish a new outgoing connection.
    */
-  def outgoingConnection(host: String, port: Int,
-                         connectionContext: ConnectionContext,
+  def outgoingConnection(to: ConnectHttp,
                          localAddress: Optional[InetSocketAddress],
                          settings: ClientConnectionSettings,
                          log: LoggingAdapter): Flow[HttpRequest, HttpResponse, CompletionStage[OutgoingConnection]] =
     adaptOutgoingFlow {
-      connectionContext match {
-        case https: HttpsConnectionContext ⇒ delegate.outgoingConnectionHttps(host, port, https.asScala, localAddress.asScala, settings.asScala, log)
-        case _                             ⇒ delegate.outgoingConnection(host, port, localAddress.asScala, settings.asScala, log)
-      }
+      if (to.isHttps)
+        delegate.outgoingConnectionHttps(to.host, to.port, to.effectiveConnectionContext(defaultClientHttpsContext).asInstanceOf[HttpsConnectionContext].asScala, localAddress.asScala, settings.asScala, log)
+      else
+        delegate.outgoingConnection(to.host, to.port, localAddress.asScala, settings.asScala, log)
     }
 
   /**
@@ -379,7 +358,7 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    * object of type `T` from the application which is emitted together with the corresponding response.
    */
   def newHostConnectionPool[T](to: ConnectHttp, materializer: Materializer): Flow[Pair[HttpRequest, T], Pair[Try[HttpResponse], T], HostConnectionPool] =
-    adaptTupleFlow(delegate.newHostConnectionPool[T](to.host, to.port)(materializer))
+    adaptTupleFlow(delegate.newHostConnectionPool[T](to.host, to.port)(materializer).mapMaterializedValue(_.toJava))
 
   /**
    * Same as [[newHostConnectionPool]] but with HTTPS encryption.
@@ -390,9 +369,13 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
                                settings: ConnectionPoolSettings,
                                log: LoggingAdapter, materializer: Materializer): Flow[Pair[HttpRequest, T], Pair[Try[HttpResponse], T], HostConnectionPool] =
     adaptTupleFlow {
-      to.effectiveConnectionContext(defaultClientHttpsContext) match {
-        case https: HttpsConnectionContext ⇒ delegate.newHostConnectionPoolHttps[T](to.host, to.port, https.asScala, settings.asScala, log)(materializer)
-        case _                             ⇒ delegate.newHostConnectionPool[T](to.host, to.port, settings.asScala, log)(materializer)
+      to.effectiveHttpsConnectionContext(defaultClientHttpsContext) match {
+        case https: HttpsConnectionContext ⇒
+          delegate.newHostConnectionPoolHttps[T](to.host, to.port, https.asScala, settings.asScala, log)(materializer)
+            .mapMaterializedValue(_.toJava)
+        case _ ⇒
+          delegate.newHostConnectionPool[T](to.host, to.port, settings.asScala, log)(materializer)
+            .mapMaterializedValue(_.toJava)
       }
     }
 
@@ -434,7 +417,7 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
    * object of type `T` from the application which is emitted together with the corresponding response.
    */
   def cachedHostConnectionPool[T](to: ConnectHttp, materializer: Materializer): Flow[Pair[HttpRequest, T], Pair[Try[HttpResponse], T], HostConnectionPool] =
-    adaptTupleFlow(delegate.cachedHostConnectionPool[T](to.host, to.port)(materializer))
+    adaptTupleFlow(delegate.cachedHostConnectionPool[T](to.host, to.port)(materializer).mapMaterializedValue(_.toJava))
 
   /**
    * Same as [[cachedHostConnectionPool]] but with HTTPS encryption.
@@ -444,7 +427,8 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
   def cachedHostConnectionPool[T](to: ConnectHttp,
                                   settings: ConnectionPoolSettings,
                                   log: LoggingAdapter, materializer: Materializer): Flow[Pair[HttpRequest, T], Pair[Try[HttpResponse], T], HostConnectionPool] =
-    adaptTupleFlow(delegate.cachedHostConnectionPoolHttps[T](to.host, to.port, to.effectiveConnectionContext(defaultClientHttpsContext).asScala, settings.asScala, log)(materializer))
+    adaptTupleFlow(delegate.cachedHostConnectionPoolHttps[T](to.host, to.port, to.effectiveHttpsConnectionContext(defaultClientHttpsContext).asScala, settings.asScala, log)(materializer)
+      .mapMaterializedValue(_.toJava))
 
   /**
    * Creates a new "super connection pool flow", which routes incoming requests to a (cached) host connection pool
@@ -657,6 +641,7 @@ class Http(system: ExtendedActorSystem) extends akka.actor.Extension {
 
   /**
    * Gets the default
+   *
    * @return
    */
   def defaultServerHttpContext: ConnectionContext =

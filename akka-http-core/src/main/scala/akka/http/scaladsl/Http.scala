@@ -5,12 +5,11 @@
 package akka.http.scaladsl
 
 import java.net.InetSocketAddress
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{ CompletionStage, ConcurrentHashMap }
 import javax.net.ssl._
 
 import akka.actor._
 import akka.event.{ Logging, LoggingAdapter }
-import akka.http._
 import akka.http.impl.engine.HttpConnectionTimeoutException
 import akka.http.impl.engine.client._
 import akka.http.impl.engine.server._
@@ -22,18 +21,19 @@ import akka.http.scaladsl.model.headers.Host
 import akka.http.scaladsl.model.ws.{ Message, WebSocketRequest, WebSocketUpgradeResponse }
 import akka.http.scaladsl.settings.{ ServerSettings, ClientConnectionSettings, ConnectionPoolSettings }
 import akka.http.scaladsl.util.FastFuture
-import akka.NotUsed
-import akka.stream.Materializer
-import akka.stream.io._
+import akka.{ Done, NotUsed }
+import akka.stream._
+import akka.stream.TLSProtocol._
 import akka.stream.scaladsl._
 import com.typesafe.config.Config
 import com.typesafe.sslconfig.akka._
 import com.typesafe.sslconfig.akka.util.AkkaLoggerFactory
 import com.typesafe.sslconfig.ssl.ConfigSSLContextBuilder
 
-import scala.concurrent.{ ExecutionContext, Future, Promise, TimeoutException }
+import scala.concurrent._
 import scala.util.Try
 import scala.util.control.NonFatal
+import scala.compat.java8.FutureConverters._
 
 class HttpExt(private val config: Config)(implicit val system: ActorSystem) extends akka.actor.Extension
   with DefaultSSLContextCreation {
@@ -41,6 +41,8 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
   import Http._
 
   override val sslConfig = AkkaSSLConfig(system)
+
+  private[this] val defaultConnectionPoolSettings = ConnectionPoolSettings(system)
 
   // configured default HttpsContext for the client-side
   // SYNCHRONIZED ACCESS ONLY!
@@ -217,8 +219,11 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
                               log: LoggingAdapter = system.log): Flow[HttpRequest, HttpResponse, Future[OutgoingConnection]] =
     _outgoingConnection(host, port, localAddress, settings, connectionContext, log)
 
-  private def _outgoingConnection(host: String, port: Int, localAddress: Option[InetSocketAddress],
-                                  settings: ClientConnectionSettings, connectionContext: ConnectionContext,
+  private def _outgoingConnection(host: String,
+                                  port: Int,
+                                  localAddress: Option[InetSocketAddress],
+                                  settings: ClientConnectionSettings,
+                                  connectionContext: ConnectionContext,
                                   log: LoggingAdapter): Flow[HttpRequest, HttpResponse, Future[OutgoingConnection]] = {
     val hostHeader = if (port == connectionContext.defaultPort) Host(host) else Host(host, port)
     val layer = clientLayer(hostHeader, settings, log)
@@ -275,7 +280,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    * use the `akka.http.host-connection-pool` config section or pass in a [[ConnectionPoolSettings]] explicitly.
    */
   def newHostConnectionPool[T](host: String, port: Int = 80,
-                               settings: ConnectionPoolSettings = ConnectionPoolSettings(system),
+                               settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
                                log: LoggingAdapter = system.log)(implicit fm: Materializer): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] = {
     val cps = ConnectionPoolSetup(settings, ConnectionContext.noEncryption(), log)
     newHostConnectionPool(HostConnectionPoolSetup(host, port, cps))
@@ -292,7 +297,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    */
   def newHostConnectionPoolHttps[T](host: String, port: Int = 443,
                                     connectionContext: HttpsConnectionContext = defaultClientHttpsContext,
-                                    settings: ConnectionPoolSettings = ConnectionPoolSettings(system),
+                                    settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
                                     log: LoggingAdapter = system.log)(implicit fm: Materializer): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] = {
     val cps = ConnectionPoolSetup(settings, connectionContext, log)
     newHostConnectionPool(HostConnectionPoolSetup(host, port, cps))
@@ -341,7 +346,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    * use the `akka.http.host-connection-pool` config section or pass in a [[ConnectionPoolSettings]] explicitly.
    */
   def cachedHostConnectionPool[T](host: String, port: Int = 80,
-                                  settings: ConnectionPoolSettings = ConnectionPoolSettings(system),
+                                  settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
                                   log: LoggingAdapter = system.log)(implicit fm: Materializer): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] = {
     val cps = ConnectionPoolSetup(settings, ConnectionContext.noEncryption(), log)
     val setup = HostConnectionPoolSetup(host, port, cps)
@@ -359,7 +364,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    */
   def cachedHostConnectionPoolHttps[T](host: String, port: Int = 443,
                                        connectionContext: HttpsConnectionContext = defaultClientHttpsContext,
-                                       settings: ConnectionPoolSettings = ConnectionPoolSettings(system),
+                                       settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
                                        log: LoggingAdapter = system.log)(implicit fm: Materializer): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] = {
     val cps = ConnectionPoolSetup(settings, connectionContext, log)
     val setup = HostConnectionPoolSetup(host, port, cps)
@@ -405,7 +410,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    * use the `akka.http.host-connection-pool` config section or pass in a [[ConnectionPoolSettings]] explicitly.
    */
   def superPool[T](connectionContext: HttpsConnectionContext = defaultClientHttpsContext,
-                   settings: ConnectionPoolSettings = ConnectionPoolSettings(system),
+                   settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
                    log: LoggingAdapter = system.log)(implicit fm: Materializer): Flow[(HttpRequest, T), (Try[HttpResponse], T), NotUsed] =
     clientFlow[T](settings) { request ⇒ request -> cachedGateway(request, settings, connectionContext, log) }
 
@@ -414,13 +419,13 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    * effective URI to produce a response future.
    *
    * If an explicit [[ConnectionContext]] is given then it rather than the configured default [[ConnectionContext]] will be used
-   * for setting up the HTTPS connection pool, if the request is targetted towards an `https` endpoint.
+   * for setting up the HTTPS connection pool, if the request is targeted towards an `https` endpoint.
    *
    * Note that the request must have an absolute URI, otherwise the future will be completed with an error.
    */
   def singleRequest(request: HttpRequest,
                     connectionContext: HttpsConnectionContext = defaultClientHttpsContext,
-                    settings: ConnectionPoolSettings = ConnectionPoolSettings(system),
+                    settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
                     log: LoggingAdapter = system.log)(implicit fm: Materializer): Future[HttpResponse] =
     try {
       val gatewayFuture = cachedGateway(request, settings, connectionContext, log)
@@ -541,7 +546,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
     }
 
   // every ActorSystem maintains its own connection pools
-  private[this] val hostPoolCache = new ConcurrentHashMap[HostConnectionPoolSetup, Future[PoolGateway]]
+  private[http] val hostPoolCache = new ConcurrentHashMap[HostConnectionPoolSetup, Future[PoolGateway]]
 
   private def cachedGateway(request: HttpRequest,
                             settings: ConnectionPoolSettings, connectionContext: ConnectionContext,
@@ -562,7 +567,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
     val gatewayPromise = Promise[PoolGateway]()
     hostPoolCache.putIfAbsent(setup, gatewayPromise.future) match {
       case null ⇒ // only one thread can get here at a time
-        val whenShuttingDown = Promise[Unit]()
+        val whenShuttingDown = Promise[Done]()
         val gateway =
           try new PoolGateway(setup, whenShuttingDown)
           catch {
@@ -603,10 +608,10 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
   }
 
   /** Creates real or placebo SslTls stage based on if ConnectionContext is HTTPS or not. */
-  private[http] def sslTlsStage(connectionContext: ConnectionContext, role: Role, hostInfo: Option[(String, Int)] = None) =
+  private[http] def sslTlsStage(connectionContext: ConnectionContext, role: TLSRole, hostInfo: Option[(String, Int)] = None) =
     connectionContext match {
-      case hctx: HttpsConnectionContext ⇒ SslTls(hctx.sslContext, hctx.firstSession, role, hostInfo = hostInfo)
-      case other                        ⇒ SslTlsPlacebo.forScala // if it's not HTTPS, we don't enable SSL/TLS
+      case hctx: HttpsConnectionContext ⇒ TLS(hctx.sslContext, hctx.firstSession, role, hostInfo = hostInfo)
+      case other                        ⇒ TLSPlacebo() // if it's not HTTPS, we don't enable SSL/TLS
     }
 }
 
@@ -711,15 +716,20 @@ object Http extends ExtensionId[HttpExt] with ExtensionIdProvider {
   /**
    * Represents a connection pool to a specific target host and pool configuration.
    */
-  final case class HostConnectionPool(setup: HostConnectionPoolSetup)(
-    private[http] val gatewayFuture: Future[PoolGateway]) extends javadsl.HostConnectionPool { // enable test access
+  final case class HostConnectionPool private[http] (setup: HostConnectionPoolSetup)(
+    private[http] val gatewayFuture: Future[PoolGateway]) { // enable test access
 
     /**
      * Asynchronously triggers the shutdown of the host connection pool.
      *
      * The produced [[Future]] is fulfilled when the shutdown has been completed.
      */
-    def shutdown()(implicit ec: ExecutionContext): Future[Unit] = gatewayFuture.flatMap(_.shutdown())
+    def shutdown()(implicit ec: ExecutionContextExecutor): Future[Done] = gatewayFuture.flatMap(_.shutdown())
+
+    private[http] def toJava = new akka.http.javadsl.HostConnectionPool {
+      override def setup = HostConnectionPool.this.setup
+      override def shutdown(executor: ExecutionContextExecutor): CompletionStage[Done] = HostConnectionPool.this.shutdown()(executor).toJava
+    }
   }
 
   //////////////////// EXTENSION SETUP ///////////////////
@@ -736,7 +746,7 @@ object Http extends ExtensionId[HttpExt] with ExtensionIdProvider {
  * TLS configuration for an HTTPS server binding or client connection.
  * For the sslContext please refer to the com.typeasfe.ssl-config library.
  * The remaining four parameters configure the initial session that will
- * be negotiated, see [[akka.stream.io.NegotiateNewSession]] for details.
+ * be negotiated, see [[NegotiateNewSession]] for details.
  */
 trait DefaultSSLContextCreation {
 
@@ -776,9 +786,9 @@ trait DefaultSSLContextCreation {
     import com.typesafe.sslconfig.ssl.{ ClientAuth ⇒ SslClientAuth }
     val clientAuth = config.sslParametersConfig.clientAuth match {
       case SslClientAuth.Default ⇒ None
-      case SslClientAuth.Want    ⇒ Some(ClientAuth.Want)
-      case SslClientAuth.Need    ⇒ Some(ClientAuth.Need)
-      case SslClientAuth.None    ⇒ Some(ClientAuth.None)
+      case SslClientAuth.Want    ⇒ Some(TLSClientAuth.Want)
+      case SslClientAuth.Need    ⇒ Some(TLSClientAuth.Need)
+      case SslClientAuth.None    ⇒ Some(TLSClientAuth.None)
     }
     // hostname!
     defaultParams.setEndpointIdentificationAlgorithm("https")

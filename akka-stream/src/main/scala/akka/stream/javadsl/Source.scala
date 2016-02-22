@@ -102,7 +102,7 @@ object Source {
    * data.add(1);
    * data.add(2);
    * data.add(3);
-   * Source.fom(data);
+   * Source.from(data);
    * }}}
    *
    * Starts a new `Source` from the given `Iterable`. This is like starting from an
@@ -198,16 +198,16 @@ object Source {
    * Create a `Source` that will unfold a value of type `S` into
    * a pair of the next state `S` and output elements of type `E`.
    */
-  def unfold[S, E](s: S, f: function.Function[S, Optional[(S, E)]]): Source[E, NotUsed] =
-    new Source(scaladsl.Source.unfold(s)((s: S) ⇒ f.apply(s).asScala))
+  def unfold[S, E](s: S, f: function.Function[S, Optional[Pair[S, E]]]): Source[E, NotUsed] =
+    new Source(scaladsl.Source.unfold(s)((s: S) ⇒ f.apply(s).asScala.map(_.toScala)))
 
   /**
    * Same as [[unfold]], but uses an async function to generate the next state-element tuple.
    */
-  def unfoldAsync[S, E](s: S, f: function.Function[S, CompletionStage[Optional[(S, E)]]]): Source[E, NotUsed] =
+  def unfoldAsync[S, E](s: S, f: function.Function[S, CompletionStage[Optional[Pair[S, E]]]]): Source[E, NotUsed] =
     new Source(
       scaladsl.Source.unfoldAsync(s)(
-        (s: S) ⇒ f.apply(s).toScala.map(_.asScala)(akka.dispatch.ExecutionContexts.sameThreadExecutionContext)))
+        (s: S) ⇒ f.apply(s).toScala.map(_.asScala.map(_.toScala))(akka.dispatch.ExecutionContexts.sameThreadExecutionContext)))
 
   /**
    * Create a `Source` that immediately ends the stream with the `cause` failure to every connected `Sink`.
@@ -375,47 +375,6 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    */
   def viaMat[T, M, M2](flow: Graph[FlowShape[Out, T], M], combine: function.Function2[Mat, M, M2]): javadsl.Source[T, M2] =
     new Source(delegate.viaMat(flow)(combinerToScala(combine)))
-
-  /**
-   * Transform this [[Source]] by appending the given processing stages, ensuring
-   * that an `asyncBoundary` attribute is set around those steps.
-   * {{{
-   *     +----------------------------+
-   *     | Resulting Source           |
-   *     |                            |
-   *     |  +------+        +------+  |
-   *     |  |      |        |      |  |
-   *     |  | this | ~Out~> | flow | ~~> T
-   *     |  |      |        |      |  |
-   *     |  +------+        +------+  |
-   *     +----------------------------+
-   * }}}
-   * The materialized value of the combined [[Flow]] will be the materialized
-   * value of the current flow (ignoring the other Flow’s value), use
-   * `viaMat` if a different strategy is needed.
-   */
-  def viaAsync[T, M](flow: Graph[FlowShape[Out, T], M]): javadsl.Source[T, Mat] =
-    new Source(delegate.viaAsync(flow))
-
-  /**
-   * Transform this [[Source]] by appending the given processing stages, ensuring
-   * that an `asyncBoundary` attribute is set around those steps.
-   * {{{
-   *     +----------------------------+
-   *     | Resulting Source           |
-   *     |                            |
-   *     |  +------+        +------+  |
-   *     |  |      |        |      |  |
-   *     |  | this | ~Out~> | flow | ~~> T
-   *     |  |      |        |      |  |
-   *     |  +------+        +------+  |
-   *     +----------------------------+
-   * }}}
-   * The `combine` function is used to compose the materialized values of this flow and that
-   * flow into the materialized value of the resulting Flow.
-   */
-  def viaAsyncMat[T, M, M2](flow: Graph[FlowShape[Out, T], M], combine: function.Function2[Mat, M, M2]): javadsl.Source[T, M2] =
-    new Source(delegate.viaAsyncMat(flow)(combinerToScala(combine)))
 
   /**
    * Connect this [[Source]] to a [[Sink]], concatenating the processing steps of both.
@@ -776,7 +735,28 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
     new Source(delegate.recover(pf))
 
   /**
-   * Transform each input element into an `Iterable of output elements that is
+   * RecoverWith allows to switch to alternative Source on flow failure. It will stay in effect after
+   * a failure has been recovered so that each time there is a failure it is fed into the `pf` and a new
+   * Source may be materialized.
+   *
+   * Since the underlying failure signal onError arrives out-of-band, it might jump over existing elements.
+   * This stage can recover the failure signal, but not the skipped elements, which will be dropped.
+   *
+   * '''Emits when''' element is available from the upstream or upstream is failed and element is available
+   * from alternative Source
+   *
+   * '''Backpressures when''' downstream backpressures
+   *
+   * '''Completes when''' upstream completes or upstream failed with exception pf can handle
+   *
+   * '''Cancels when''' downstream cancels
+   *
+   */
+  def recoverWith[T >: Out](pf: PartialFunction[Throwable, _ <: Graph[SourceShape[T], NotUsed]]): Source[T, Mat @uncheckedVariance] =
+    new Source(delegate.recoverWith(pf))
+
+  /**
+   * Transform each input element into an `Iterable` of output elements that is
    * then flattened into the output stream.
    *
    * Make sure that the `Iterable` is immutable or at least not modified after
@@ -798,6 +778,36 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    */
   def mapConcat[T](f: function.Function[Out, _ <: java.lang.Iterable[T]]): javadsl.Source[T, Mat] =
     new Source(delegate.mapConcat(elem ⇒ Util.immutableSeq(f.apply(elem))))
+
+  /**
+   * Transform each input element into an `Iterable` of output elements that is
+   * then flattened into the output stream. The transformation is meant to be stateful,
+   * which is enabled by creating the transformation function anew for every materialization —
+   * the returned function will typically close over mutable objects to store state between
+   * invocations. For the stateless variant see [[#mapConcat]].
+   *
+   * Make sure that the `Iterable` is immutable or at least not modified after
+   * being used as an output sequence. Otherwise the stream may fail with
+   * `ConcurrentModificationException` or other more subtle errors may occur.
+   *
+   * The returned `Iterable` MUST NOT contain `null` values,
+   * as they are illegal as stream elements - according to the Reactive Streams specification.
+   *
+   * '''Emits when''' the mapping function returns an element or there are still remaining elements
+   * from the previously calculated collection
+   *
+   * '''Backpressures when''' downstream backpressures or there are still remaining elements from the
+   * previously calculated collection
+   *
+   * '''Completes when''' upstream completes and all remaining elements has been emitted
+   *
+   * '''Cancels when''' downstream cancels
+   */
+  def statefulMapConcat[T](f: function.Creator[function.Function[Out, java.lang.Iterable[T]]]): javadsl.Source[T, Mat] =
+    new Source(delegate.statefulMapConcat { () ⇒
+      val fun = f.create()
+      elem ⇒ Util.immutableSeq(fun(elem))
+    })
 
   /**
    * Transform this stream by applying the given function to each of the elements
@@ -828,7 +838,7 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    * @see [[#mapAsyncUnordered]]
    */
   def mapAsync[T](parallelism: Int, f: function.Function[Out, CompletionStage[T]]): javadsl.Source[T, Mat] =
-    new Source(delegate.mapAsync(parallelism)(x => f(x).toScala))
+    new Source(delegate.mapAsync(parallelism)(x ⇒ f(x).toScala))
 
   /**
    * Transform this stream by applying the given function to each of the elements
@@ -860,7 +870,7 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    * @see [[#mapAsync]]
    */
   def mapAsyncUnordered[T](parallelism: Int, f: function.Function[Out, CompletionStage[T]]): javadsl.Source[T, Mat] =
-    new Source(delegate.mapAsyncUnordered(parallelism)(x => f(x).toScala))
+    new Source(delegate.mapAsyncUnordered(parallelism)(x ⇒ f(x).toScala))
 
   /**
    * Only pass on those elements that satisfy the given predicate.
@@ -1266,6 +1276,9 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    * until the subscriber is ready to accept them. For example a conflate step might average incoming numbers if the
    * upstream publisher is faster.
    *
+   * This version of conflate allows to derive a seed from the first element and change the aggregated type to be
+   * different than the input type. See [[Flow.conflate]] for a simpler version that does not change types.
+   *
    * This element only rolls up elements if the upstream is faster, but if the downstream is faster it will not
    * duplicate elements.
    *
@@ -1277,13 +1290,38 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    *
    * '''Cancels when''' downstream cancels
    *
-   * see also [[Source.batch]] [[Source.batchWeighted]]
+   * see also [[Source.conflate]]  [[Source.batch]] [[Source.batchWeighted]]
    *
    * @param seed Provides the first state for a conflated value using the first unconsumed element as a start
    * @param aggregate Takes the currently aggregated value and the current pending element to produce a new aggregate
    */
-  def conflate[S](seed: function.Function[Out, S], aggregate: function.Function2[S, Out, S]): javadsl.Source[S, Mat] =
-    new Source(delegate.conflate(seed.apply)(aggregate.apply))
+  def conflateWithSeed[S](seed: function.Function[Out, S], aggregate: function.Function2[S, Out, S]): javadsl.Source[S, Mat] =
+    new Source(delegate.conflateWithSeed(seed.apply)(aggregate.apply))
+
+  /**
+   * Allows a faster upstream to progress independently of a slower subscriber by conflating elements into a summary
+   * until the subscriber is ready to accept them. For example a conflate step might average incoming numbers if the
+   * upstream publisher is faster.
+   * This version of conflate does not change the output type of the stream. See [[Source.conflateWithSeed]] for a
+   * more flexible version that can take a seed function and transform elements while rolling up.
+   *
+   * This element only rolls up elements if the upstream is faster, but if the downstream is faster it will not
+   * duplicate elements.
+   *
+   * '''Emits when''' downstream stops backpressuring and there is a conflated element available
+   *
+   * '''Backpressures when''' never
+   *
+   * '''Completes when''' upstream completes
+   *
+   * '''Cancels when''' downstream cancels
+   *
+   * see also [[Source.conflateWithSeed]]  [[Source.batch]] [[Source.batchWeighted]]
+   *
+   * @param aggregate Takes the currently aggregated value and the current pending element to produce a new aggregate
+   */
+  def conflate[O2 >: Out](aggregate: function.Function2[O2, O2, O2]): javadsl.Source[O2, Mat] =
+    new Source(delegate.conflate(aggregate.apply))
 
   /**
    * Allows a faster upstream to progress independently of a slower subscriber by aggregating elements into batches
@@ -1670,7 +1708,7 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    * Tokens drops into the bucket at a given rate and can be `spared` for later use up to bucket capacity
    * to allow some burstyness. Whenever stream wants to send an element, it takes as many
    * tokens from the bucket as number of elements. If there isn't any, throttle waits until the
-   * bucket accumulates enough tokens.
+   * bucket accumulates enough tokens. Bucket is full when stream just materialized and started.
    *
    * Parameter `mode` manages behaviour when upstream is faster than throttle rate:
    *  - [[akka.stream.ThrottleMode.Shaping]] makes pauses before emitting messages to meet throttle rate
@@ -1739,7 +1777,7 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    * downstream.
    */
   def watchTermination[M]()(matF: function.Function2[Mat, CompletionStage[Done], M]): javadsl.Source[Out, M] =
-    new Source(delegate.watchTermination()((left, right) => matF(left, right.toJava)))
+    new Source(delegate.watchTermination()((left, right) ⇒ matF(left, right.toJava)))
 
   /**
    * Delays the initial element by the specified duration.
@@ -1779,6 +1817,12 @@ final class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Grap
    */
   override def named(name: String): javadsl.Source[Out, Mat] =
     new Source(delegate.named(name))
+
+  /**
+   * Put an asynchronous boundary around this `Source`
+   */
+  override def async: javadsl.Source[Out, Mat] =
+    new Source(delegate.async)
 
   /**
    * Logs elements flowing through the stream as well as completion and erroring.

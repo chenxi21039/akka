@@ -17,6 +17,7 @@ import akka.stream.{ javadsl, _ }
 import akka.util.ByteString
 import org.reactivestreams.{ Publisher, Subscriber }
 import scala.annotation.tailrec
+import scala.collection.immutable
 import scala.concurrent.duration.{ FiniteDuration, _ }
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
@@ -29,6 +30,16 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
   extends Graph[SinkShape[In], Mat] {
 
   override val shape: SinkShape[In] = module.shape.asInstanceOf[SinkShape[In]]
+
+  /**
+   * Transform this Sink by applying a function to each *incoming* upstream element before
+   * it is passed to the [[Sink]]
+   *
+   * '''Backpressures when''' original [[Sink]] backpressures
+   *
+   * '''Cancels when''' original [[Sink]] backpressures
+   */
+  def contramap[In2](f: In2 ⇒ In): Sink[In2, Mat] = Flow.fromFunction(f).toMat(this)(Keep.right)
 
   /**
    * Connect this `Sink` to a `Source` and run it. The returned value is the materialized value
@@ -48,7 +59,7 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
    * only to the contained processing stages).
    */
   override def withAttributes(attr: Attributes): Sink[In, Mat] =
-    new Sink(module.withAttributes(attr).nest())
+    new Sink(module.withAttributes(attr))
 
   /**
    * Add the given attributes to this Source. Further calls to `withAttributes`
@@ -62,7 +73,12 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
   /**
    * Add a ``name`` attribute to this Flow.
    */
-  override def named(name: String): Sink[In, Mat] = withAttributes(Attributes.name(name))
+  override def named(name: String): Sink[In, Mat] = addAttributes(Attributes.name(name))
+
+  /**
+   * Put an asynchronous boundary around this `Sink`
+   */
+  override def async: Sink[In, Mat] = addAttributes(Attributes.asyncBoundary)
 
   /** Converts this Scala DSL element to it's Java DSL counterpart. */
   def asJava: javadsl.Sink[In, Mat] = new javadsl.Sink(this)
@@ -146,11 +162,7 @@ object Sink {
    *
    * See also [[Flow.limit]], [[Flow.limitWeighted]], [[Flow.take]], [[Flow.takeWithin]], [[Flow.takeWhile]]
    */
-  def seq[T]: Sink[T, Future[Seq[T]]] = {
-    Flow[T].grouped(Integer.MAX_VALUE).toMat(Sink.headOption)(Keep.right) mapMaterializedValue { e ⇒
-      e.map(_.getOrElse(Seq.empty[T]))(ExecutionContexts.sameThreadExecutionContext)
-    }
-  }
+  def seq[T]: Sink[T, Future[immutable.Seq[T]]] = Sink.fromGraph(new SeqStage[T])
 
   /**
    * A `Sink` that materializes into a [[org.reactivestreams.Publisher]].
@@ -328,6 +340,6 @@ object Sink {
    * @see [[akka.stream.SinkQueue]]
    */
   def queue[T](): Sink[T, SinkQueue[T]] =
-    Sink.fromGraph(new QueueSink().withAttributes(DefaultAttributes.queueSink))
+    Sink.fromGraph(new QueueSink())
 
 }

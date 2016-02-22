@@ -12,11 +12,15 @@ object Dependencies {
   val junitVersion = "4.12"
 
   val Versions = Seq(
-    crossScalaVersions := Seq("2.11.7"), //"2.12.0-M2"
+    crossScalaVersions := Seq("2.11.7"), // "2.12.0-M3"
     scalaVersion := crossScalaVersions.value.head,
     scalaStmVersion := sys.props.get("akka.build.scalaStmVersion").getOrElse("0.7"),
     scalaCheckVersion := sys.props.get("akka.build.scalaCheckVersion").getOrElse("1.11.6"),
-    scalaTestVersion := (if (scalaVersion.value == "2.12.0-M2") "2.2.5-M2" else "2.2.4")
+    scalaTestVersion := (
+      if (scalaVersion.value == "2.12.0-M2") "2.2.5-M2"
+      else if (scalaVersion.value == "2.12.0-M3") "2.2.5-M3"
+      else "2.2.4"
+    )
   )
 
   object Compile {
@@ -32,7 +36,7 @@ object Dependencies {
     val scalaXml      = "org.scala-lang.modules"      %% "scala-xml"                   % "1.0.1" // Scala License
     val scalaReflect  = ScalaVersionDependentModuleID.versioned("org.scala-lang" % "scala-reflect" % _) // Scala License
 
-    val slf4jApi      = "org.slf4j"                   % "slf4j-api"                    % "1.7.12"       // MIT
+    val slf4jApi      = "org.slf4j"                   % "slf4j-api"                    % "1.7.16"       // MIT
 
         // mirrored in OSGi sample
     val uncommonsMath = "org.uncommons.maths"         % "uncommons-maths"              % "1.2.2a" exclude("jfree", "jcommon") exclude("jfree", "jfreechart")      // ApacheV2
@@ -46,7 +50,7 @@ object Dependencies {
     val reactiveStreams = "org.reactivestreams"       % "reactive-streams"             % "1.0.0" // CC0
 
     // ssl-config
-    val sslConfigAkka = "com.typesafe"               %% "ssl-config-akka"              % "0.1.1" // ApacheV2
+    val sslConfigAkka = "com.typesafe"               %% "ssl-config-akka"              % "0.1.3" // ApacheV2
 
     // For akka-http spray-json support
     val sprayJson   = "io.spray"                     %% "spray-json"                   % "1.3.2"       // ApacheV2
@@ -89,8 +93,8 @@ object Dependencies {
       val metricsAll      = Seq(metrics, metricsJvm, latencyUtils, hdrHistogram)
 
       // sigar logging
-      val slf4jJul      = "org.slf4j"                   % "jul-to-slf4j"                 % "1.7.12"    % "test"    // MIT
-      val slf4jLog4j    = "org.slf4j"                   % "log4j-over-slf4j"             % "1.7.12"    % "test"    // MIT
+      val slf4jJul      = "org.slf4j"                   % "jul-to-slf4j"                 % "1.7.16"    % "test"    // MIT
+      val slf4jLog4j    = "org.slf4j"                   % "log4j-over-slf4j"             % "1.7.16"    % "test"    // MIT
 
       lazy val sprayJson = Compile.sprayJson % "test"
 
@@ -136,11 +140,13 @@ object Dependencies {
 
   val agent = l ++= Seq(scalaStm.value, Test.scalatest.value, Test.junit)
 
-  val persistence = l ++= Seq(Provided.levelDB, Provided.levelDBNative, Test.scalatest.value, Test.junit, Test.commonsIo, Test.scalaXml)
+  val persistence = l ++= Seq(Provided.levelDB, Provided.levelDBNative, Test.scalatest.value, Test.junit, Test.commonsIo, Test.commonsCodec, Test.scalaXml)
 
   val persistenceQuery = l ++= Seq(Test.scalatest.value, Test.junit, Test.commonsIo)
 
   val persistenceTck = l ++= Seq(Test.scalatest.value.copy(configurations = Some("compile")), Test.junit.copy(configurations = Some("compile")))
+
+  val persistenceShared = l ++= Seq(Provided.levelDB, Provided.levelDBNative)
 
   val kernel = l ++= Seq(Test.scalatest.value, Test.junit)
 
@@ -168,7 +174,7 @@ object Dependencies {
     DependencyHelpers.versionDependentDeps(
       Dependencies.Compile.scalaReflect % "provided"
     ),
-    addCompilerPlugin("org.scalamacros" % "paradise" % "2.0.1" cross CrossVersion.full)
+    addCompilerPlugin("org.scalamacros" % "paradise" % "2.0.1" cross CrossVersion.fullMapped(nominalScalaVersion))
   )
 
   lazy val httpTestkit = l ++= Seq(
@@ -217,4 +223,15 @@ object DependencyHelpers {
    */
   def versionDependentDeps(modules: ScalaVersionDependentModuleID*): Def.Setting[Seq[ModuleID]] =
     libraryDependencies <++= scalaVersion(version => modules.flatMap(m => m.modules(version)))
+
+  val ScalaVersion = """\d\.\d+\.\d+(?:-(?:M|RC)\d+)?""".r
+  val nominalScalaVersion: String => String = {
+    // matches:
+    // 2.12.0-M1
+    // 2.12.0-RC1
+    // 2.12.0
+    case version @ ScalaVersion() => version
+    // transforms 2.12.0-custom-version to 2.12.0
+    case version => version.takeWhile(_ != '-')
+  }
 }

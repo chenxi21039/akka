@@ -9,8 +9,11 @@ import akka.actor.ActorSystem;
 import akka.dispatch.Foreach;
 import akka.japi.JavaPartialFunction;
 import akka.testkit.JavaTestKit;
+//#imports
 import akka.stream.*;
 import akka.stream.javadsl.*;
+//#imports
+import docs.AbstractJavaTest;
 import docs.stream.TwitterStreamQuickstartDocTest.Model.Author;
 import docs.stream.TwitterStreamQuickstartDocTest.Model.Hashtag;
 import docs.stream.TwitterStreamQuickstartDocTest.Model.Tweet;
@@ -36,20 +39,25 @@ import static docs.stream.TwitterStreamQuickstartDocTest.Model.AKKA;
 import static docs.stream.TwitterStreamQuickstartDocTest.Model.tweets;
 
 @SuppressWarnings("unused")
-public class TwitterStreamQuickstartDocTest {
+public class TwitterStreamQuickstartDocTest extends AbstractJavaTest {
+
+  private static final long serialVersionUID = 1L;
 
   static ActorSystem system;
 
+  static Materializer mat;
 
   @BeforeClass
   public static void setup() {
     system = ActorSystem.create("SampleActorTest");
+    mat = ActorMaterializer.create(system);
   }
 
   @AfterClass
   public static void tearDown() {
     JavaTestKit.shutdownActorSystem(system);
     system = null;
+    mat = null;
   }
 
   static abstract class Model {
@@ -212,9 +220,6 @@ public class TwitterStreamQuickstartDocTest {
       //#backpressure-by-readline
     }
   }
-
-
-  final Materializer mat = ActorMaterializer.create(system);
 
   @Test
   public void demonstrateFilterAndMap() {

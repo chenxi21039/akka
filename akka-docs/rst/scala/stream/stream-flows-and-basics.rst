@@ -36,9 +36,8 @@ Graph
   is running.
 Processing Stage
   The common name for all building blocks that build up a Graph.
-  Examples of a processing stage would be  operations like ``map()``, ``filter()``, stages added by ``transform()`` like
-  :class:`PushStage`, :class:`PushPullStage`, :class:`StatefulStage` and graph junctions like ``Merge`` or ``Broadcast``.
-  For the full list of built-in processing stages see :ref:`stages-overview`
+  Examples of a processing stage would be  operations like ``map()``, ``filter()``, custom ``GraphStage`` s and graph
+  junctions like ``Merge`` or ``Broadcast``. For the full list of built-in processing stages see :ref:`stages-overview_scala`
 
 When we talk about *asynchronous, non-blocking backpressure* we mean that the processing stages available in Akka
 Streams will not use blocking calls but asynchronous message passing to exchange messages between each other, and they
@@ -245,8 +244,9 @@ The first point can be countered by pre-fusing and then reusing a stream bluepri
 .. includecode:: ../code/docs/stream/FlowDocSpec.scala#explicit-fusing
 
 In order to balance the effects of the second and third bullet points you will have to insert asynchronous
-boundaries manually into your flows and graphs by way of adding ``Attributes.asyncBoundary`` to pieces that
-shall communicate with the rest of the graph in an asynchronous fashion.
+boundaries manually into your flows and graphs by way of adding ``Attributes.asyncBoundary`` using the method
+``async`` on ``Source``, ``Sink`` and ``Flow`` to pieces that shall communicate with the rest of the graph in an
+asynchronous fashion.
 
 .. includecode:: ../code/docs/stream/FlowDocSpec.scala#flow-async
 

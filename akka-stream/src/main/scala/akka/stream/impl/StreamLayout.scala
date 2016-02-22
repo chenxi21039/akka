@@ -136,6 +136,10 @@ object StreamLayout {
     /**
      * Verify that the given Shape has the same ports and return a new module with that shape.
      * Concrete implementations may throw UnsupportedOperationException where applicable.
+     *
+     * Please note that this method MUST NOT be implemented using a CopiedModule since
+     * the purpose of replaceShape can also be to rearrange the ports (as in BidiFlow.reversed)
+     * and that purpose would be defeated.
      */
     def replaceShape(s: Shape): Module
 
@@ -199,7 +203,7 @@ object StreamLayout {
         downstreams.updated(from, to),
         upstreams.updated(to, from),
         materializedValueComputation,
-        attributes)
+        if (isSealed) Attributes.none else attributes)
     }
 
     final def transformMaterializedValue(f: Any ⇒ Any): Module = {
@@ -289,39 +293,20 @@ object StreamLayout {
         Attributes.none)
     }
 
-    /**
-     * Creates a new Module which contains `this` Module
-     * @return a new Module
-     */
-    def nest(): Module = {
-      if (Debug) validate(this)
-
-      CompositeModule(
-        Set(this),
-        shape,
-        /*
-         * Composite modules always maintain the flattened upstreams/downstreams map (i.e. they contain all the
-         * layout information of all the nested modules). Copied modules break the nesting, scoping them to the
-         * copied module. The MaterializerSession will take care of propagating the necessary Publishers and Subscribers
-         * from the enclosed scope to the outer scope.
-         */
-        downstreams,
-        upstreams,
-        /*
-         * Wrapping like this shields the outer module from the details of the
-         * materialized value computation of its submodules.
-         */
-        Atomic(this),
-        Attributes.none)
-    }
-
     def subModules: Set[Module]
-    final def isSealed: Boolean = isAtomic || isCopied || isFused
+    final def isSealed: Boolean = isAtomic || isCopied || isFused || attributes.attributeList.nonEmpty
 
     def downstreams: Map[OutPort, InPort] = Map.empty
     def upstreams: Map[InPort, OutPort] = Map.empty
 
     def materializedValueComputation: MaterializedValueNode = Atomic(this)
+
+    /**
+     * The purpose of this method is to create a copy to be included in a larger
+     * graph such that port identity clashes are avoided. Where a full copy is not
+     * possible or desirable, use a CopiedModule. The shape of the resulting
+     * module MUST NOT contain the same ports as this module’s shape.
+     */
     def carbonCopy: Module
 
     def attributes: Attributes
@@ -334,24 +319,20 @@ object StreamLayout {
   object EmptyModule extends Module {
     override def shape = ClosedShape
     override def replaceShape(s: Shape) =
-      if (s == ClosedShape) this
-      else throw new UnsupportedOperationException("cannot replace the shape of the EmptyModule")
+      if (s != shape) throw new UnsupportedOperationException("cannot replace the shape of the EmptyModule")
+      else this
 
     override def compose(that: Module): Module = that
 
     override def compose[A, B, C](that: Module, f: (A, B) ⇒ C): Module =
       throw new UnsupportedOperationException("It is invalid to combine materialized value with EmptyModule")
 
-    override def nest(): Module = this
-
-    override def subModules: Set[Module] = Set.empty
-
     override def withAttributes(attributes: Attributes): Module =
       throw new UnsupportedOperationException("EmptyModule cannot carry attributes")
+
+    override def subModules: Set[Module] = Set.empty
     override def attributes = Attributes.none
-
     override def carbonCopy: Module = this
-
     override def isRunnable: Boolean = false
     override def isAtomic: Boolean = false
     override def materializedValueComputation: MaterializedValueNode = Ignore
@@ -362,20 +343,23 @@ object StreamLayout {
                                 copyOf: Module) extends Module {
     override val subModules: Set[Module] = Set(copyOf)
 
-    override def withAttributes(attr: Attributes): Module = this.copy(attributes = attr)
+    override def withAttributes(attr: Attributes): Module =
+      if (attr ne attributes) this.copy(attributes = attr)
+      else this
 
     override def carbonCopy: Module = this.copy(shape = shape.deepCopy())
 
-    override def replaceShape(s: Shape): Module = {
-      shape.requireSamePortsAs(s)
-      copy(shape = s)
-    }
+    override def replaceShape(s: Shape): Module =
+      if (s != shape) {
+        shape.requireSamePortsAs(s)
+        CompositeModule(this, s)
+      } else this
 
     override val materializedValueComputation: MaterializedValueNode = Atomic(copyOf)
 
     override def isCopied: Boolean = true
 
-    override def toString: String = "copy of " + copyOf.toString
+    override def toString: String = s"$copyOf (copy)"
   }
 
   final case class CompositeModule(
@@ -386,10 +370,11 @@ object StreamLayout {
     override val materializedValueComputation: MaterializedValueNode,
     override val attributes: Attributes) extends Module {
 
-    override def replaceShape(s: Shape): Module = {
-      shape.requireSamePortsAs(s)
-      copy(shape = s)
-    }
+    override def replaceShape(s: Shape): Module =
+      if (s != shape) {
+        shape.requireSamePortsAs(s)
+        copy(shape = s)
+      } else this
 
     override def carbonCopy: Module = CopiedModule(shape.deepCopy(), attributes, copyOf = this)
 
@@ -397,11 +382,16 @@ object StreamLayout {
 
     override def toString =
       s"""
-        | Module: ${this.attributes.nameOrDefault("unnamed")}
-        | Modules: ${subModules.iterator.map(m ⇒ "\n   " + m.attributes.nameOrDefault(m.getClass.getName)).mkString("")}
-        | Downstreams: ${downstreams.iterator.map { case (in, out) ⇒ s"\n   $in -> $out" }.mkString("")}
-        | Upstreams: ${upstreams.iterator.map { case (out, in) ⇒ s"\n   $out -> $in" }.mkString("")}
-        |""".stripMargin
+         |  Name: ${this.attributes.nameOrDefault("unnamed")}
+         |  Modules:
+         |    ${subModules.iterator.map(m ⇒ m.attributes.nameLifted.getOrElse(m.toString.replaceAll("\n", "\n    "))).mkString("\n    ")}
+         |  Downstreams: ${downstreams.iterator.map { case (in, out) ⇒ s"\n    $in -> $out" }.mkString("")}
+         |  Upstreams: ${upstreams.iterator.map { case (out, in) ⇒ s"\n    $out -> $in" }.mkString("")}
+         |""".stripMargin
+  }
+
+  object CompositeModule {
+    def apply(m: Module, s: Shape): CompositeModule = CompositeModule(Set(m), s, Map.empty, Map.empty, Atomic(m), Attributes.none)
   }
 
   final case class FusedModule(
@@ -415,10 +405,11 @@ object StreamLayout {
 
     override def isFused: Boolean = true
 
-    override def replaceShape(s: Shape): Module = {
-      shape.requireSamePortsAs(s)
-      copy(shape = s)
-    }
+    override def replaceShape(s: Shape): Module =
+      if (s != shape) {
+        shape.requireSamePortsAs(s)
+        copy(shape = s)
+      } else this
 
     override def carbonCopy: Module = CopiedModule(shape.deepCopy(), attributes, copyOf = this)
 
@@ -426,11 +417,11 @@ object StreamLayout {
 
     override def toString =
       s"""
-        |  Module: ${this.attributes.nameOrDefault("unnamed")}
+        |  Name: ${this.attributes.nameOrDefault("unnamed")}
         |  Modules:
-        |    ${subModules.iterator.map(m ⇒ m.toString.split("\n").mkString("\n    ")).mkString("\n    ")}
-        |  Downstreams: ${downstreams.iterator.map { case (in, out) ⇒ s"\n   $in -> $out" }.mkString("")}
-        |  Upstreams: ${upstreams.iterator.map { case (out, in) ⇒ s"\n   $out -> $in" }.mkString("")}
+        |    ${subModules.iterator.map(m ⇒ m.attributes.nameLifted.getOrElse(m.toString.replaceAll("\n", "\n    "))).mkString("\n    ")}
+        |  Downstreams: ${downstreams.iterator.map { case (in, out) ⇒ s"\n    $in -> $out" }.mkString("")}
+        |  Upstreams: ${upstreams.iterator.map { case (out, in) ⇒ s"\n    $out -> $in" }.mkString("")}
         |""".stripMargin
   }
 }

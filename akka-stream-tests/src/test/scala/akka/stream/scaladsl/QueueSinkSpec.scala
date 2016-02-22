@@ -5,17 +5,20 @@ package akka.stream.scaladsl
 
 import akka.actor.Status
 import akka.pattern.pipe
+import akka.stream.Attributes.inputBuffer
 import akka.stream.{ OverflowStrategy, ActorMaterializer }
 import akka.stream.testkit.Utils._
 import akka.stream.testkit.{ AkkaSpec, _ }
+import org.scalatest.concurrent.ScalaFutures
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
 
-class QueueSinkSpec extends AkkaSpec {
+class QueueSinkSpec extends AkkaSpec with ScalaFutures {
   implicit val ec = system.dispatcher
   implicit val materializer = ActorMaterializer()
+  implicit val patience = PatienceConfig(2.second)
 
   val ex = new RuntimeException("ex") with NoStackTrace
 
@@ -112,5 +115,48 @@ class QueueSinkSpec extends AkkaSpec {
       queue.pull().onFailure { case e ⇒ e.isInstanceOf[IllegalStateException] should ===(true) }
     }
 
+    "keep on sending even after the buffer has been full" in assertAllStagesStopped {
+      val bufferSize = 16
+      val streamElementCount = bufferSize + 4
+      val sink = Sink.queue[Int]()
+        .withAttributes(inputBuffer(bufferSize, bufferSize))
+      val (probe, queue) = Source(1 to streamElementCount)
+        .alsoToMat(Flow[Int].take(bufferSize).watchTermination()(Keep.right).to(Sink.ignore))(Keep.right)
+        .toMat(sink)(Keep.both)
+        .run()
+      probe.futureValue should ===(akka.Done)
+      for (i ← 1 to streamElementCount) {
+        queue.pull() pipeTo testActor
+        expectMsg(Some(i))
+      }
+      queue.pull() pipeTo testActor
+      expectMsg(None)
+
+    }
+
+    "work with one element buffer" in assertAllStagesStopped {
+      val sink = Sink.queue[Int]().withAttributes(inputBuffer(1, 1))
+      val probe = TestPublisher.manualProbe[Int]()
+      val queue = Source.fromPublisher(probe).runWith(sink)
+      val sub = probe.expectSubscription()
+
+      queue.pull().pipeTo(testActor)
+      sub.sendNext(1) // should pull next element
+      expectMsg(Some(1))
+
+      queue.pull().pipeTo(testActor)
+      expectNoMsg() // element requested but buffer empty
+      sub.sendNext(2)
+      expectMsg(Some(2))
+
+      sub.sendComplete()
+      Await.result(queue.pull(), noMsgTimeout) should be(None)
+    }
+
+    "fail to materialize with zero sized input buffer" in {
+      an[IllegalArgumentException] shouldBe thrownBy {
+        Source.single(()).runWith(Sink.queue().withAttributes(inputBuffer(0, 0)))
+      }
+    }
   }
 }

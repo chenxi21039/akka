@@ -12,7 +12,7 @@ import akka.stream.{ Graph, FlowShape, javadsl, scaladsl }
 
 import scala.collection.immutable
 import scala.reflect.ClassTag
-import akka.{ NotUsed, japi }
+import akka.NotUsed
 import akka.http.impl.model.{ JavaQuery, JavaUri }
 import akka.http.javadsl.{ model ⇒ jm, HttpConnectionContext, ConnectionContext, HttpsConnectionContext }
 import akka.http.scaladsl.{ model ⇒ sm }
@@ -165,7 +165,7 @@ private[http] object JavaMapping {
     def toScala(javaObject: J): S = cast[S](javaObject)
   }
 
-  implicit object ConnectionContext extends Inherited[ConnectionContext, akka.http.scaladsl.HttpConnectionContext]
+  implicit object ConnectionContext extends Inherited[ConnectionContext, akka.http.scaladsl.ConnectionContext]
   implicit object HttpConnectionContext extends Inherited[HttpConnectionContext, akka.http.scaladsl.HttpConnectionContext]
   implicit object HttpsConnectionContext extends Inherited[HttpsConnectionContext, akka.http.scaladsl.HttpsConnectionContext]
 

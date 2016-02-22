@@ -303,26 +303,6 @@ class InterpreterSupervisionSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnNext(3)))
     }
 
-    "resume when MapConcat throws" in new OneBoundedSetup[Int](Seq(
-      MapConcat((x: Int) ⇒ if (x == 0) throw TE else List(x, -x), resumingDecider))) {
-      downstream.requestOne()
-      lastEvents() should be(Set(RequestOne))
-      upstream.onNext(1)
-      lastEvents() should be(Set(OnNext(1)))
-      downstream.requestOne()
-      lastEvents() should be(Set(OnNext(-1)))
-
-      downstream.requestOne()
-      lastEvents() should be(Set(RequestOne))
-      upstream.onNext(0) // boom
-      lastEvents() should be(Set(RequestOne))
-
-      upstream.onNext(2)
-      lastEvents() should be(Set(OnNext(2)))
-      downstream.requestOne()
-      lastEvents() should be(Set(OnNext(-2)))
-    }
-
     "restart when Collect throws" in {
       // TODO can't get type inference to work with `pf` inlined
       val pf: PartialFunction[Int, Int] =
@@ -385,70 +365,6 @@ class InterpreterSupervisionSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(RequestOne))
       upstream.onNext(20)
       lastEvents() should be(Set(OnNext(25))) // 1 + 4 + 20
-    }
-
-    "restart when Conflate `seed` throws" in new OneBoundedSetup[Int](Seq(Conflate(
-      (in: Int) ⇒ if (in == 1) throw TE else in,
-      (agg: Int, x: Int) ⇒ agg + x,
-      restartingDecider))) {
-
-      lastEvents() should be(Set(RequestOne))
-
-      downstream.requestOne()
-      lastEvents() should be(Set.empty)
-
-      upstream.onNext(0)
-      lastEvents() should be(Set(OnNext(0), RequestOne))
-
-      upstream.onNext(1) // boom
-      lastEvents() should be(Set(RequestOne))
-
-      upstream.onNext(2)
-      lastEvents() should be(Set(RequestOne))
-
-      upstream.onNext(10)
-      lastEvents() should be(Set(RequestOne))
-
-      downstream.requestOne()
-      lastEvents() should be(Set(OnNext(12))) // note that 1 has been discarded
-
-      downstream.requestOne()
-      lastEvents() should be(Set.empty)
-    }
-
-    "restart when Conflate `aggregate` throws" in new OneBoundedSetup[Int](Seq(Conflate(
-      (in: Int) ⇒ in,
-      (agg: Int, x: Int) ⇒ if (x == 2) throw TE else agg + x,
-      restartingDecider))) {
-
-      lastEvents() should be(Set(RequestOne))
-
-      downstream.requestOne()
-      lastEvents() should be(Set.empty)
-
-      upstream.onNext(0)
-      lastEvents() should be(Set(OnNext(0), RequestOne))
-
-      upstream.onNext(1)
-      lastEvents() should be(Set(RequestOne))
-
-      upstream.onNext(2) // boom
-      lastEvents() should be(Set(RequestOne))
-
-      upstream.onNext(10)
-      lastEvents() should be(Set(RequestOne))
-
-      downstream.requestOne()
-      lastEvents() should be(Set(OnNext(10))) // note that 1 and 2 has been discarded
-
-      downstream.requestOne()
-      lastEvents() should be(Set.empty)
-
-      upstream.onNext(4)
-      lastEvents() should be(Set(OnNext(4), RequestOne))
-
-      downstream.cancel()
-      lastEvents() should be(Set(Cancel))
     }
 
     "fail when Expand `seed` throws" in new OneBoundedSetup[Int](

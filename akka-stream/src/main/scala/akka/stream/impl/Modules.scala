@@ -21,8 +21,8 @@ private[akka] abstract class SourceModule[+Out, +Mat](val shape: SourceShape[Out
   def create(context: MaterializationContext): (Publisher[Out] @uncheckedVariance, Mat)
 
   override def replaceShape(s: Shape): Module =
-    if (s == shape) this
-    else throw new UnsupportedOperationException("cannot replace the shape of a Source, you need to wrap it in a Graph for that")
+    if (s != shape) throw new UnsupportedOperationException("cannot replace the shape of a Source, you need to wrap it in a Graph for that")
+    else this
 
   // This is okay since the only caller of this method is right below.
   protected def newInstance(shape: SourceShape[Out] @uncheckedVariance): SourceModule[Out, Mat]
@@ -107,8 +107,8 @@ private[akka] final class ActorRefSource[Out](
   extends SourceModule[Out, ActorRef](shape) {
 
   override def create(context: MaterializationContext) = {
-    val ref = ActorMaterializer.downcast(context.materializer).actorOf(context,
-      ActorRefSourceActor.props(bufferSize, overflowStrategy))
+    val mat = ActorMaterializer.downcast(context.materializer)
+    val ref = mat.actorOf(context, ActorRefSourceActor.props(bufferSize, overflowStrategy, mat.settings))
     (akka.stream.actor.ActorPublisher[Out](ref), ref)
   }
 

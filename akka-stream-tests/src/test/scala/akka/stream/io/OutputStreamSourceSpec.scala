@@ -3,16 +3,16 @@
  */
 package akka.stream.io
 
-import java.io.{ IOException, OutputStream }
+import java.io.IOException
 import java.util.concurrent.TimeoutException
 
-import akka.actor.{ ActorSystem, NoSerializationVerificationNeeded }
+import akka.actor.ActorSystem
 import akka.stream._
+import akka.stream.Attributes.inputBuffer
 import akka.stream.impl.StreamSupervisor.Children
 import akka.stream.impl.io.OutputStreamSourceStage
 import akka.stream.impl.{ ActorMaterializerImpl, StreamSupervisor }
-import akka.stream.scaladsl.{ Keep, Source, StreamConverters }
-import akka.stream.stage.OutHandler
+import akka.stream.scaladsl.{ Keep, StreamConverters, Sink }
 import akka.stream.testkit.Utils._
 import akka.stream.testkit._
 import akka.stream.testkit.scaladsl.TestSink
@@ -39,34 +39,6 @@ class OutputStreamSourceSpec extends AkkaSpec(UnboundedMailboxConfig) {
 
   def expectSuccess[T](f: Future[T], value: T) =
     Await.result(f, timeout) should be(value)
-
-  object OutputStreamSourceTestMessages {
-    case object Pull extends NoSerializationVerificationNeeded
-    case object Finish extends NoSerializationVerificationNeeded
-  }
-
-  def testSource(probe: TestProbe): Source[ByteString, OutputStream] = {
-    class OutputStreamSourceTestStage(val timeout: FiniteDuration)
-      extends OutputStreamSourceStage(timeout) {
-
-      override def createLogicAndMaterializedValue(inheritedAttributes: Attributes) = {
-        val (logic, inputStream) = super.createLogicAndMaterializedValue(inheritedAttributes)
-        val outHandler = logic.handlers(out.id).asInstanceOf[OutHandler]
-        logic.handlers(out.id) = new OutHandler {
-          override def onDownstreamFinish(): Unit = {
-            probe.ref ! OutputStreamSourceTestMessages.Finish
-            outHandler.onDownstreamFinish()
-          }
-          override def onPull(): Unit = {
-            probe.ref ! OutputStreamSourceTestMessages.Pull
-            outHandler.onPull()
-          }
-        }
-        (logic, inputStream)
-      }
-    }
-    Source.fromGraph(new OutputStreamSourceTestStage(timeout))
-  }
 
   "OutputStreamSource" must {
     "read bytes from OutputStream" in assertAllStagesStopped {
@@ -161,19 +133,34 @@ class OutputStreamSourceSpec extends AkkaSpec(UnboundedMailboxConfig) {
 
     "throw IOException when writing to the stream after the subscriber has cancelled the reactive stream" in assertAllStagesStopped {
       val sourceProbe = TestProbe()
-      val (outputStream, probe) = testSource(sourceProbe).toMat(TestSink.probe[ByteString])(Keep.both).run
+      val (outputStream, probe) = TestSourceStage(new OutputStreamSourceStage(timeout), sourceProbe)
+        .toMat(TestSink.probe[ByteString])(Keep.both).run
 
       val s = probe.expectSubscription()
 
       outputStream.write(bytesArray)
       s.request(1)
-      sourceProbe.expectMsg(OutputStreamSourceTestMessages.Pull)
+      sourceProbe.expectMsg(GraphStageMessages.Pull)
 
       probe.expectNext(byteString)
 
       s.cancel()
-      sourceProbe.expectMsg(OutputStreamSourceTestMessages.Finish)
+      sourceProbe.expectMsg(GraphStageMessages.DownstreamFinish)
       the[Exception] thrownBy outputStream.write(bytesArray) shouldBe a[IOException]
+    }
+
+    "fail to materialize with zero sized input buffer" in {
+      an[IllegalArgumentException] shouldBe thrownBy {
+        StreamConverters.asOutputStream(timeout)
+          .withAttributes(inputBuffer(0, 0))
+          .runWith(Sink.head)
+        /*
+         With Sink.head we test the code path in which the source
+         itself throws an exception when being materialized. If
+         Sink.ignore is used, the same exception is thrown by
+         Materializer.
+         */
+      }
     }
   }
 }

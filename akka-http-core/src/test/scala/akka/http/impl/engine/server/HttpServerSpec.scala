@@ -11,6 +11,7 @@ import scala.util.Random
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import org.scalatest.Inside
+import org.scalatest.concurrent.ScalaFutures
 import akka.util.ByteString
 import akka.stream.scaladsl._
 import akka.stream.ActorMaterializer
@@ -325,6 +326,53 @@ class HttpServerSpec extends AkkaSpec(
       }
     }
 
+    "close the connection if request entity stream has been cancelled" in new TestSetup {
+      // two chunks sent by client
+      send("""POST / HTTP/1.1
+             |Host: example.com
+             |Transfer-Encoding: chunked
+             |
+             |6
+             |abcdef
+             |6
+             |abcdef
+             |0
+             |
+             |""")
+
+      inside(expectRequest()) {
+        case HttpRequest(POST, _, _, HttpEntity.Chunked(_, data), _) ⇒
+          val dataProbe = TestSubscriber.manualProbe[ChunkStreamPart]
+          // but only one consumed by server
+          data.take(1).to(Sink.fromSubscriber(dataProbe)).run()
+          val sub = dataProbe.expectSubscription()
+          sub.request(1)
+          dataProbe.expectNext(Chunk(ByteString("abcdef")))
+          dataProbe.expectComplete()
+          // connection closes once requested elements are consumed
+          netIn.expectCancellation()
+      }
+    }
+
+    "proceed to next request once previous request's entity has beed drained" in new TestSetup with ScalaFutures {
+      def twice(action: => Unit): Unit = { action; action }
+
+      twice {
+        send("""POST / HTTP/1.1
+               |Host: example.com
+               |Transfer-Encoding: chunked
+               |
+               |6
+               |abcdef
+               |0
+               |
+               |""")
+
+        val whenComplete = expectRequest().entity.dataBytes.runWith(Sink.ignore)
+        whenComplete.futureValue should be (akka.Done)
+      }
+    }
+
     "report a truncated entity stream on the entity data stream and the main stream for a Default entity" in new TestSetup {
       send("""POST / HTTP/1.1
              |Host: example.com
@@ -617,7 +665,6 @@ class HttpServerSpec extends AkkaSpec(
 
       val HttpRequest(POST, _, _, entity, _) = expectRequest()
       responses.sendNext(HttpResponse(entity = entity))
-      responses.sendComplete()
 
       expectResponseWithWipedDate(
         """HTTP/1.1 200 OK
@@ -641,6 +688,7 @@ class HttpServerSpec extends AkkaSpec(
       rec(100000)
 
       netIn.sendComplete()
+      responses.sendComplete()
       requests.request(1)
       requests.expectComplete()
       netOut.expectComplete()

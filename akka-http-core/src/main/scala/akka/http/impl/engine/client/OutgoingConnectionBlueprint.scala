@@ -5,24 +5,24 @@
 package akka.http.impl.engine.client
 
 import akka.NotUsed
-import akka.http.scaladsl.settings.ClientConnectionSettings
+import akka.http.scaladsl.settings.{ ClientConnectionSettings, ParserSettings }
 import language.existentials
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
-import akka.stream.io.{ SessionBytes, SslTlsInbound, SendBytes }
+import akka.stream.TLSProtocol._
 import akka.util.ByteString
 import akka.event.LoggingAdapter
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.headers.Host
-import akka.http.scaladsl.model.{ IllegalResponseException, HttpMethod, HttpRequest, HttpResponse }
+import akka.http.scaladsl.model.{ IllegalResponseException, HttpMethod, HttpRequest, HttpResponse, ResponseEntity }
 import akka.http.impl.engine.rendering.{ RequestRenderingContext, HttpRequestRendererFactory }
 import akka.http.impl.engine.parsing._
 import akka.http.impl.util._
 import akka.stream.stage.GraphStage
 import akka.stream.stage.GraphStageLogic
-import akka.stream.stage.InHandler
+import akka.stream.stage.{ InHandler, OutHandler }
 import akka.stream.impl.fusing.SubSource
 
 /**
@@ -69,24 +69,7 @@ private[http] object OutgoingConnectionBlueprint {
     import ParserOutput._
     val responsePrep = Flow[List[ResponseOutput]]
       .mapConcat(conforms)
-      .splitWhen(x ⇒ x.isInstanceOf[MessageStart] || x == MessageEnd)
-      .prefixAndTail(1)
-      .filter {
-        case (Seq(MessageEnd), remaining) ⇒
-          SubSource.kill(remaining)
-          false
-        case (seq, _) ⇒
-          seq.nonEmpty
-      }
-      .map {
-        case (Seq(ResponseStart(statusCode, protocol, headers, createEntity, _)), entityParts) ⇒
-          val entity = createEntity(entityParts) withSizeLimit parserSettings.maxContentLength
-          HttpResponse(statusCode, headers, entity, protocol)
-        case (Seq(MessageStartError(_, info)), tail) ⇒
-          // Tails can be empty, but still need one pull to figure that out -- never drop tails.
-          SubSource.kill(tail)
-          throw IllegalResponseException(info)
-      }.concatSubstreams
+      .via(new PrepareResponse(parserSettings))
 
     val core = BidiFlow.fromGraph(GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
@@ -147,6 +130,129 @@ private[http] object OutgoingConnectionBlueprint {
   }
 
   import ParserOutput._
+
+  /**
+   * This is essentially a three state state machine, it is either 'idle' - waiting for a response to come in
+   * or has seen the start of a response and is waiting for either chunks followed by MessageEnd if chunked
+   * or just MessageEnd in the case of a strict response.
+   *
+   * For chunked responses a new substream into the response entity is opened and data is streamed there instead
+   * of downstream until end of chunks has been reached.
+   */
+  private[client] final class PrepareResponse(parserSettings: ParserSettings)
+    extends GraphStage[FlowShape[ResponseOutput, HttpResponse]] {
+
+    private val in = Inlet[ResponseOutput]("PrepareResponse.in")
+    private val out = Outlet[HttpResponse]("PrepareResponse.out")
+
+    val shape = new FlowShape(in, out)
+
+    override def createLogic(effectiveAttributes: Attributes) = new GraphStageLogic(shape) with InHandler with OutHandler {
+      private var entitySource: SubSourceOutlet[ResponseOutput] = _
+      private def entitySubstreamStarted = entitySource ne null
+      private def idle = this
+      private var completionDeferred = false
+
+      def setIdleHandlers(): Unit = {
+        if (completionDeferred) {
+          completeStage()
+        } else {
+          setHandler(in, idle)
+          setHandler(out, idle)
+        }
+      }
+
+      def onPush(): Unit = grab(in) match {
+        case ResponseStart(statusCode, protocol, headers, entityCreator, _) ⇒
+          val entity = createEntity(entityCreator) withSizeLimit parserSettings.maxContentLength
+          push(out, HttpResponse(statusCode, headers, entity, protocol))
+
+        case MessageStartError(_, info) ⇒
+          throw IllegalResponseException(info)
+
+        case other ⇒
+          throw new IllegalStateException(s"ResponseStart expected but $other received.")
+      }
+
+      def onPull(): Unit = {
+        if (!entitySubstreamStarted) pull(in)
+      }
+
+      override def onDownstreamFinish(): Unit = {
+        // if downstream cancels while streaming entity,
+        // make sure we also cancel the entity source, but
+        // after being done with streaming the entity
+        if (entitySubstreamStarted) {
+          completionDeferred = true
+        } else {
+          completeStage()
+        }
+      }
+
+      setIdleHandlers()
+
+      // with a strict message there still is a MessageEnd to wait for
+      lazy val waitForMessageEnd = new InHandler with OutHandler {
+        def onPush(): Unit = grab(in) match {
+          case MessageEnd ⇒
+            if (isAvailable(out)) pull(in)
+            setIdleHandlers()
+          case other ⇒ throw new IllegalStateException(s"MessageEnd expected but $other received.")
+        }
+
+        override def onPull(): Unit = {
+          // ignore pull as we will anyways pull when we get MessageEnd
+        }
+      }
+
+      // with a streamed entity we push the chunks into the substream
+      // until we reach MessageEnd
+      private lazy val substreamHandler = new InHandler with OutHandler {
+        override def onPush(): Unit = grab(in) match {
+          case MessageEnd ⇒
+            entitySource.complete()
+            entitySource = null
+            // there was a deferred pull from upstream
+            // while we were streaming the entity
+            if (isAvailable(out)) pull(in)
+            setIdleHandlers()
+
+          case messagePart ⇒
+            entitySource.push(messagePart)
+        }
+
+        override def onPull(): Unit = pull(in)
+
+        override def onUpstreamFinish(): Unit = {
+          entitySource.complete()
+          completeStage()
+        }
+
+        override def onUpstreamFailure(reason: Throwable): Unit = {
+          entitySource.fail(reason)
+          failStage(reason)
+        }
+      }
+
+      private def createEntity(creator: EntityCreator[ResponseOutput, ResponseEntity]): ResponseEntity = {
+        creator match {
+          case StrictEntityCreator(entity) ⇒
+            // upstream demanded one element, which it just got
+            // but we want MessageEnd as well
+            pull(in)
+            setHandler(in, waitForMessageEnd)
+            setHandler(out, waitForMessageEnd)
+            entity
+
+          case StreamedEntityCreator(creator) ⇒
+            entitySource = new SubSourceOutlet[ResponseOutput]("EntitySource")
+            entitySource.setHandler(substreamHandler)
+            setHandler(in, substreamHandler)
+            creator(Source.fromGraph(entitySource.source))
+        }
+      }
+    }
+  }
 
   /**
    * A merge that follows this logic:

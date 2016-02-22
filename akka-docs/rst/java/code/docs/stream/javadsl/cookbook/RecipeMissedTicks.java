@@ -29,19 +29,20 @@ import java.util.concurrent.TimeUnit;
 
 public class RecipeMissedTicks extends RecipeTest {
   static ActorSystem system;
+  static Materializer mat;
 
   @BeforeClass
   public static void setup() {
-    system = ActorSystem.create("RecipeMultiGroupBy");
+    system = ActorSystem.create("RecipeMissedTicks");
+    mat = ActorMaterializer.create(system);
   }
 
   @AfterClass
   public static void tearDown() {
     JavaTestKit.shutdownActorSystem(system);
     system = null;
+    mat = null;
   }
-
-  final Materializer mat = ActorMaterializer.create(system);
 
   @Test
   public void work() throws Exception {
@@ -58,11 +59,11 @@ public class RecipeMissedTicks extends RecipeTest {
         @SuppressWarnings("unused")
         //#missed-ticks
         final Flow<Tick, Integer, NotUsed> missedTicks =
-          Flow.of(Tick.class).conflate(tick -> 0, (missed, tick) -> missed + 1);
+          Flow.of(Tick.class).conflateWithSeed(tick -> 0, (missed, tick) -> missed + 1);
         //#missed-ticks
         final TestLatch latch = new TestLatch(3, system);
         final Flow<Tick, Integer, NotUsed> realMissedTicks =
-                Flow.of(Tick.class).conflate(tick -> 0, (missed, tick) -> { latch.countDown(); return missed + 1; });
+                Flow.of(Tick.class).conflateWithSeed(tick -> 0, (missed, tick) -> { latch.countDown(); return missed + 1; });
 
         Pair<TestPublisher.Probe<Tick>, TestSubscriber.Probe<Integer>> pubSub =
         		tickStream.via(realMissedTicks).toMat(sink, Keep.both()).run(mat);

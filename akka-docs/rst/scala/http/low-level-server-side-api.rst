@@ -132,6 +132,10 @@ connection. An often times more convenient alternative is to explicitly add a ``
 ``HttpResponse``. This response will then be the last one on the connection and the server will actively close the
 connection when it has been sent out.
 
+Connection will also be closed if request entity has been cancelled (e.g. by attaching it to ``Sink.cancelled``)
+or consumed only partially (e.g. by using ``take`` combinator). In order to prevent this behaviour entity should be
+explicitly drained by attaching it to ``Sink.ignore``.
+
 
 .. _serverSideHTTPS:
 
@@ -209,7 +213,7 @@ through the stream starting from the stage which failed, all the way downstream 
 Connections Source failures
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In the example below we add a custom ``PushStage`` (see :ref:`stream-customize-scala`) in order to react to the
+In the example below we add a custom ``GraphStage`` (see :ref:`stream-customize-scala`) in order to react to the
 stream's failure. We signal a ``failureMonitor`` actor with the cause why the stream is going down, and let the Actor
 handle the rest – maybe it'll decide to restart the server or shutdown the ActorSystem, that however is not our concern anymore.
 

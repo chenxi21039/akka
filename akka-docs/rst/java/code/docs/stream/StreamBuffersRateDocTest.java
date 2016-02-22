@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import akka.NotUsed;
+import docs.AbstractJavaTest;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -18,24 +19,25 @@ import akka.stream.*;
 import akka.stream.javadsl.*;
 import akka.testkit.JavaTestKit;
 
-public class StreamBuffersRateDocTest {
+public class StreamBuffersRateDocTest extends AbstractJavaTest {
 
   static class Job {}
 
   static ActorSystem system;
+  static Materializer mat;
 
   @BeforeClass
   public static void setup() {
-    system = ActorSystem.create("StreamBufferRateDocTest");
+    system = ActorSystem.create("StreamBuffersDocTest");
+    mat = ActorMaterializer.create(system);
   }
 
   @AfterClass
   public static void tearDown() {
     JavaTestKit.shutdownActorSystem(system);
     system = null;
+    mat = null;
   }
-
-  final Materializer mat = ActorMaterializer.create(system);
 
   final SilenceSystemOut.System System = SilenceSystemOut.get();
 
@@ -81,7 +83,7 @@ public class StreamBuffersRateDocTest {
     final Source<String, Cancellable> tickSource =
         Source.tick(oneSecond.mul(3), oneSecond.mul(3), "tick");
     final Flow<String, Integer, NotUsed> conflate =
-        Flow.of(String.class).conflate(
+        Flow.of(String.class).conflateWithSeed(
             first -> 1, (count, elem) -> count + 1);
 
     RunnableGraph.fromGraph(GraphDSL.create(b -> {

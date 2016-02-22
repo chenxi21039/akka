@@ -8,6 +8,7 @@ import akka.NotUsed
 import akka.stream._
 import akka.stream.impl.Stages.DefaultAttributes
 import akka.stream.impl.SubscriptionTimeoutException
+import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
 import akka.stream.stage._
 import akka.stream.scaladsl._
 import akka.stream.actor.ActorSubscriberMessage
@@ -21,7 +22,7 @@ import akka.stream.impl.MultiStreamOutputProcessor.SubstreamSubscriptionTimeout
 import scala.annotation.tailrec
 import akka.stream.impl.PublisherSource
 import akka.stream.impl.CancellingSubscriber
-import akka.stream.impl.BoundedBuffer
+import akka.stream.impl.{ Buffer ⇒ BufferImpl }
 
 /**
  * INTERNAL API
@@ -38,7 +39,9 @@ final class FlattenMerge[T, M](breadth: Int) extends GraphStage[FlowShape[Graph[
     var sources = Set.empty[SubSinkInlet[T]]
     def activeSources = sources.size
 
-    val q = new BoundedBuffer[SubSinkInlet[T]](breadth)
+    var q: BufferImpl[SubSinkInlet[T]] = _
+
+    override def preStart(): Unit = q = BufferImpl(breadth, materializer)
 
     def pushOut(): Unit = {
       val src = q.dequeue()
@@ -214,17 +217,25 @@ object Split {
   /** Splits after the current element. The current element will be the last element in the current substream. */
   case object SplitAfter extends SplitDecision
 
-  def when[T](p: T ⇒ Boolean): Graph[FlowShape[T, Source[T, NotUsed]], NotUsed] = new Split(Split.SplitBefore, p)
-  def after[T](p: T ⇒ Boolean): Graph[FlowShape[T, Source[T, NotUsed]], NotUsed] = new Split(Split.SplitAfter, p)
+  def when[T](p: T ⇒ Boolean, substreamCancelStrategy: SubstreamCancelStrategy): Graph[FlowShape[T, Source[T, NotUsed]], NotUsed] =
+    new Split(Split.SplitBefore, p, substreamCancelStrategy)
+
+  def after[T](p: T ⇒ Boolean, substreamCancelStrategy: SubstreamCancelStrategy): Graph[FlowShape[T, Source[T, NotUsed]], NotUsed] =
+    new Split(Split.SplitAfter, p, substreamCancelStrategy)
 }
 
 /**
  * INERNAL API
  */
-final class Split[T](decision: Split.SplitDecision, p: T ⇒ Boolean) extends GraphStage[FlowShape[T, Source[T, NotUsed]]] {
+final class Split[T](decision: Split.SplitDecision, p: T ⇒ Boolean, substreamCancelStrategy: SubstreamCancelStrategy) extends GraphStage[FlowShape[T, Source[T, NotUsed]]] {
   val in: Inlet[T] = Inlet("Split.in")
   val out: Outlet[Source[T, NotUsed]] = Outlet("Split.out")
   override val shape: FlowShape[T, Source[T, NotUsed]] = FlowShape(in, out)
+
+  private val propagateSubstreamCancel = substreamCancelStrategy match {
+    case SubstreamCancelStrategies.Propagate ⇒ true
+    case SubstreamCancelStrategies.Drain     ⇒ false
+  }
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) {
     import Split._
@@ -329,8 +340,9 @@ final class Split[T](decision: Split.SplitDecision, p: T ⇒ Boolean) extends Gr
 
       override def onDownstreamFinish(): Unit = {
         substreamCancelled = true
-        if (isClosed(in)) completeStage()
-        else {
+        if (isClosed(in) || propagateSubstreamCancel) {
+          completeStage()
+        } else {
           // Start draining
           if (!hasBeenPulled(in)) pull(in)
         }

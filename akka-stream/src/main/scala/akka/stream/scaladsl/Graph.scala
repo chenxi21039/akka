@@ -10,10 +10,12 @@ import akka.stream.impl.fusing.GraphStages
 import akka.stream.impl.fusing.GraphStages.MaterializedValueSource
 import akka.stream.impl.Stages.{ DefaultAttributes, StageModule, SymbolicStage }
 import akka.stream.impl.StreamLayout._
+import akka.stream.scaladsl.Partition.PartitionOutOfBoundsException
 import akka.stream.stage.{ OutHandler, InHandler, GraphStageLogic, GraphStage }
 import scala.annotation.unchecked.uncheckedVariance
 import scala.annotation.tailrec
 import scala.collection.immutable
+import scala.util.control.NoStackTrace
 
 object Merge {
   /**
@@ -50,25 +52,16 @@ final class Merge[T] private (val inputPorts: Int, val eagerComplete: Boolean) e
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
     private var initialized = false
 
-    private val pendingQueue = Array.ofDim[Inlet[T]](inputPorts)
-    private var pendingHead = 0
-    private var pendingTail = 0
+    private val pendingQueue = FixedSizeBuffer[Inlet[T]](inputPorts)
+    private def pending: Boolean = pendingQueue.nonEmpty
 
     private var runningUpstreams = inputPorts
     private def upstreamsClosed = runningUpstreams == 0
 
-    private def pending: Boolean = pendingHead != pendingTail
-
     override def preStart(): Unit = in.foreach(tryPull)
 
-    private def enqueue(in: Inlet[T]): Unit = {
-      pendingQueue(pendingTail % inputPorts) = in
-      pendingTail += 1
-    }
-
     private def dequeueAndDispatch(): Unit = {
-      val in = pendingQueue(pendingHead % inputPorts)
-      pendingHead += 1
+      val in = pendingQueue.dequeue()
       push(out, grab(in))
       if (upstreamsClosed && !pending) completeStage()
       else tryPull(in)
@@ -82,7 +75,7 @@ final class Merge[T] private (val inputPorts: Int, val eagerComplete: Boolean) e
               push(out, grab(i))
               tryPull(i)
             }
-          } else enqueue(i)
+          } else pendingQueue.enqueue(i)
         }
 
         override def onUpstreamFinish() =
@@ -469,6 +462,8 @@ final class Broadcast[T](private val outputPorts: Int, eagerCancel: Boolean) ext
 
 object Partition {
 
+  case class PartitionOutOfBoundsException(msg: String) extends IndexOutOfBoundsException(msg) with NoStackTrace
+
   /**
    * Create a new `Partition` stage with the specified input type.
    *
@@ -508,7 +503,7 @@ final class Partition[T](outputPorts: Int, partitioner: T ⇒ Int) extends Graph
         val elem = grab(in)
         val idx = partitioner(elem)
         if (idx < 0 || idx >= outputPorts)
-          failStage(new IndexOutOfBoundsException(s"partitioner must return an index in the range [0,${outputPorts - 1}]. returned: [$idx] for input [$elem]."))
+          failStage(PartitionOutOfBoundsException(s"partitioner must return an index in the range [0,${outputPorts - 1}]. returned: [$idx] for input [${elem.getClass.getName}]."))
         else if (!isClosed(out(idx))) {
           if (isAvailable(out(idx))) {
             push(out(idx), elem)
@@ -607,21 +602,14 @@ final class Balance[T](val outputPorts: Int, waitForAllDownstreams: Boolean) ext
   override val shape: UniformFanOutShape[T, T] = UniformFanOutShape[T, T](in, out: _*)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
-    private val pendingQueue = Array.ofDim[Outlet[T]](outputPorts)
-    private var pendingHead: Int = 0
-    private var pendingTail: Int = 0
+    private val pendingQueue = FixedSizeBuffer[Outlet[T]](outputPorts)
+    private def noPending: Boolean = pendingQueue.isEmpty
 
     private var needDownstreamPulls: Int = if (waitForAllDownstreams) outputPorts else 0
     private var downstreamsRunning: Int = outputPorts
 
-    private def noPending: Boolean = pendingHead == pendingTail
-    private def enqueue(out: Outlet[T]): Unit = {
-      pendingQueue(pendingTail % outputPorts) = out
-      pendingTail += 1
-    }
     private def dequeueAndDispatch(): Unit = {
-      val out = pendingQueue(pendingHead % outputPorts)
-      pendingHead += 1
+      val out = pendingQueue.dequeue()
       push(out, grab(in))
       if (!noPending) pull(in)
     }
@@ -647,9 +635,9 @@ final class Balance[T](val outputPorts: Int, waitForAllDownstreams: Boolean) ext
               }
             } else {
               if (!hasBeenPulled(in)) pull(in)
-              enqueue(o)
+              pendingQueue.enqueue(o)
             }
-          } else enqueue(o)
+          } else pendingQueue.enqueue(o)
         }
 
         override def onDownstreamFinish() = {
@@ -1005,16 +993,15 @@ object GraphDSL extends GraphApply {
     }
 
     private class PortOpsImpl[+Out](override val outlet: Outlet[Out @uncheckedVariance], b: Builder[_])
-      extends PortOps[Out] {
+        extends PortOps[Out] {
 
-      override def withAttributes(attr: Attributes): Repr[Out] =
-        throw new UnsupportedOperationException("Cannot set attributes on chained ops from a junction output port")
+      override def withAttributes(attr: Attributes): Repr[Out] = throw settingAttrNotSupported
+      override def addAttributes(attr: Attributes): Repr[Out] = throw settingAttrNotSupported
+      override def named(name: String): Repr[Out] = throw settingAttrNotSupported
+      override def async: Repr[Out] = throw settingAttrNotSupported
 
-      override def addAttributes(attr: Attributes): Repr[Out] =
-        throw new UnsupportedOperationException("Cannot set attributes on chained ops from a junction output port")
-
-      override def named(name: String): Repr[Out] =
-        throw new UnsupportedOperationException("Cannot set attributes on chained ops from a junction output port")
+      private def settingAttrNotSupported =
+        new UnsupportedOperationException("Cannot set attributes on chained ops from a junction output port")
 
       override def importAndGetPort(b: Builder[_]): Outlet[Out @uncheckedVariance] = outlet
 

@@ -6,7 +6,6 @@ package docs.stream.io
 import java.io.File
 
 import akka.stream._
-import akka.stream.io.IOResult
 import akka.stream.scaladsl.{ FileIO, Sink, Source }
 import akka.stream.testkit.Utils._
 import akka.stream.testkit._
@@ -28,7 +27,7 @@ class StreamFileDocSpec extends AkkaSpec(UnboundedMailboxConfig) {
 
   {
     //#file-source
-    import akka.stream.io._
+    import akka.stream.scaladsl._
     //#file-source
     Thread.sleep(0) // needs a statement here for valid syntax and to avoid "unused" warnings
   }

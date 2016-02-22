@@ -7,7 +7,8 @@ import akka.NotUsed;
 import akka.actor.ActorSystem;
 import akka.stream.ActorMaterializer;
 import akka.stream.Materializer;
-import akka.stream.io.Framing;
+import akka.stream.javadsl.Framing;
+import akka.stream.javadsl.FramingTruncation;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.testkit.JavaTestKit;
@@ -22,19 +23,20 @@ import java.util.concurrent.TimeUnit;
 public class RecipeParseLines extends RecipeTest {
 
   static ActorSystem system;
+  static Materializer mat;
 
   @BeforeClass
   public static void setup() {
-    system = ActorSystem.create("RecipeLoggingElements");
+    system = ActorSystem.create("RecipeParseLines");
+    mat = ActorMaterializer.create(system);
   }
 
   @AfterClass
   public static void tearDown() {
     JavaTestKit.shutdownActorSystem(system);
     system = null;
+    mat = null;
   }
-
-  final Materializer mat = ActorMaterializer.create(system);
 
   @Test
   public void parseLines() throws Exception {
@@ -47,11 +49,10 @@ public class RecipeParseLines extends RecipeTest {
 
     //#parse-lines
     final Source<String, NotUsed> lines = rawData
-      .via(Framing.delimiter(ByteString.fromString("\r\n"), 100, true))
+      .via(Framing.delimiter(ByteString.fromString("\r\n"), 100, FramingTruncation.ALLOW))
       .map(b -> b.utf8String());
     //#parse-lines
-
-    lines.grouped(10).runWith(Sink.head(), mat).toCompletableFuture().get(1, TimeUnit.SECONDS);
+    lines.limit(10).runWith(Sink.seq(), mat).toCompletableFuture().get(1, TimeUnit.SECONDS);
   }
 
 }

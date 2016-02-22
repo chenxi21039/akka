@@ -9,12 +9,13 @@ import java.net.InetSocketAddress
 import java.security.MessageDigest
 import java.util
 import javax.net.ssl.SSLSession
+import akka.stream.scaladsl.ScalaSessionAPI
+
 import scala.reflect.ClassTag
 import scala.util.{ Failure, Success, Try }
 import scala.annotation.tailrec
 import scala.collection.immutable
 import akka.parboiled2.util.Base64
-import akka.stream.io.ScalaSessionAPI
 import akka.http.impl.util._
 import akka.http.javadsl.{ model ⇒ jm }
 import akka.http.scaladsl.model._
@@ -171,7 +172,7 @@ object `Accept-Ranges` extends ModeledCompanion[`Accept-Ranges`] {
   implicit val rangeUnitsRenderer = Renderer.defaultSeqRenderer[RangeUnit] // cache
 }
 final case class `Accept-Ranges`(rangeUnits: immutable.Seq[RangeUnit]) extends jm.headers.AcceptRanges
-  with RequestHeader {
+  with ResponseHeader {
   import `Accept-Ranges`.rangeUnitsRenderer
   def renderValue[R <: Rendering](r: R): r.type = if (rangeUnits.isEmpty) r ~~ "none" else r ~~ rangeUnits
   protected def companion = `Accept-Ranges`
@@ -400,7 +401,7 @@ object `Content-Range` extends ModeledCompanion[`Content-Range`] {
   def apply(byteContentRange: ByteContentRange): `Content-Range` = apply(RangeUnits.Bytes, byteContentRange)
 }
 final case class `Content-Range`(rangeUnit: RangeUnit, contentRange: ContentRange) extends jm.headers.ContentRange
-  with RequestResponseHeader {
+  with ResponseHeader {
   def renderValue[R <: Rendering](r: R): r.type = r ~~ rangeUnit ~~ ' ' ~~ contentRange
   protected def companion = `Content-Range`
 }
@@ -897,7 +898,6 @@ final case class `WWW-Authenticate`(challenges: immutable.Seq[HttpChallenge]) ex
 
 // http://en.wikipedia.org/wiki/X-Forwarded-For
 object `X-Forwarded-For` extends ModeledCompanion[`X-Forwarded-For`] {
-  def apply(first: String, more: String*): `X-Forwarded-For` = apply(RemoteAddress(first), more.map(RemoteAddress(_)): _*)
   def apply(first: RemoteAddress, more: RemoteAddress*): `X-Forwarded-For` = apply(immutable.Seq(first +: more: _*))
   implicit val addressesRenderer = Renderer.defaultSeqRenderer[RemoteAddress] // cache
 }
@@ -910,4 +910,11 @@ final case class `X-Forwarded-For`(addresses: immutable.Seq[RemoteAddress]) exte
 
   /** Java API */
   def getAddresses: Iterable[jm.RemoteAddress] = addresses.asJava
+}
+
+object `X-Real-Ip` extends ModeledCompanion[`X-Real-Ip`]
+final case class `X-Real-Ip`(address: RemoteAddress) extends jm.headers.XRealIp
+  with RequestHeader {
+  def renderValue[R <: Rendering](r: R): r.type = r ~~ address
+  protected def companion = `X-Real-Ip`
 }

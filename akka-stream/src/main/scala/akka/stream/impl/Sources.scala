@@ -15,7 +15,7 @@ import scala.compat.java8.FutureConverters._
 /**
  * INTERNAL API
  */
-private[akka] class QueueSource[T](maxBuffer: Int, overflowStrategy: OverflowStrategy) extends GraphStageWithMaterializedValue[SourceShape[T], SourceQueue[T]] {
+final private[stream] class QueueSource[T](maxBuffer: Int, overflowStrategy: OverflowStrategy) extends GraphStageWithMaterializedValue[SourceShape[T], SourceQueue[T]] {
   type Offered = Promise[QueueOfferResult]
 
   val out = Outlet[T]("queueSource.out")
@@ -24,11 +24,14 @@ private[akka] class QueueSource[T](maxBuffer: Int, overflowStrategy: OverflowStr
 
   override def createLogicAndMaterializedValue(inheritedAttributes: Attributes) = {
     val stageLogic = new GraphStageLogic(shape) with CallbackWrapper[(T, Offered)] {
-      val buffer = if (maxBuffer == 0) null else FixedSizeBuffer[T](maxBuffer)
+      var buffer: Buffer[T] = _
       var pendingOffer: Option[(T, Offered)] = None
       var pulled = false
 
-      override def preStart(): Unit = initCallback(callback.invoke)
+      override def preStart(): Unit = {
+        if (maxBuffer > 0) buffer = Buffer(maxBuffer, materializer)
+        initCallback(callback.invoke)
+      }
       override def postStop(): Unit = stopCallback {
         case (elem, promise) ⇒ promise.failure(new IllegalStateException("Stream is terminated. SourceQueue is detached"))
       }

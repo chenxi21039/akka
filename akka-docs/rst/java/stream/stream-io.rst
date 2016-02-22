@@ -24,7 +24,7 @@ which will emit an :class:`IncomingConnection` element for each new connection t
 Next, we simply handle *each* incoming connection using a :class:`Flow` which will be used as the processing stage
 to handle and emit ByteStrings from and to the TCP Socket. Since one :class:`ByteString` does not have to necessarily
 correspond to exactly one line of text (the client might be sending the line in chunks) we use the ``delimiter``
-helper Flow from ``akka.stream.io.Framing`` to chunk the inputs up into actual lines of text. The last boolean
+helper Flow from ``akka.stream.javadsl.Framing`` to chunk the inputs up into actual lines of text. The last boolean
 argument indicates that we require an explicit line ending even for the last message before the connection is closed.
 In this example we simply add exclamation marks to each incoming text message and push it through the flow:
 
@@ -86,16 +86,11 @@ it makes sense to make the Server initiate the conversation by emitting a "hello
 
 .. includecode:: ../code/docs/stream/io/StreamTcpDocTest.java#welcome-banner-chat-server
 
-The way we constructed a :class:`Flow` using the :class:`GraphDSL` is explained in detail in
-:ref:`constructing-sources-sinks-flows-from-partial-graphs-java`, however the basic concepts is rather simple–
-we can encapsulate arbitrarily complex logic within a :class:`Flow` as long as it exposes the same interface, which means
-exposing exactly one :class:`Outlet` and exactly one :class:`Inlet` which will be connected to the TCP
-pipeline. In this example we use a :class:`Concat` graph processing stage to inject the initial message, and then
-continue with handling all incoming data using the echo handler. You should use this pattern of encapsulating complex
-logic in Flows and attaching those to :class:`StreamIO` in order to implement your custom and possibly sophisticated TCP servers.
+To emit the initial message we merge a ``Source`` with a single element, after the command processing but before the
+framing and transformation to ``ByteStrings`` this way we do not have to repeat such logic.
 
 In this example both client and server may need to close the stream based on a parsed command - ``BYE`` in the case
-of the server, and ``q`` in the case of the client. This is implemented by using a custom :class:`PushStage`
+of the server, and ``q`` in the case of the client. This is implemented by using a custom :class:`GraphStage`
 which completes the stream once it encounters such command.
 
 Streaming File IO

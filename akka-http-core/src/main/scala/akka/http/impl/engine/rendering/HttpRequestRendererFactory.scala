@@ -11,7 +11,6 @@ import scala.annotation.tailrec
 import akka.event.LoggingAdapter
 import akka.util.ByteString
 import akka.stream.scaladsl.Source
-import akka.stream.stage._
 import akka.http.scaladsl.model._
 import akka.http.impl.util._
 import RenderSupport._
@@ -78,8 +77,8 @@ private[http] class HttpRequestRendererFactory(userAgentHeader: Option[headers.`
           case x: `Raw-Request-URI` ⇒ // we never render this header
             renderHeaders(tail, hostHeaderSeen, userAgentSeen, transferEncodingSeen)
 
-          case x: CustomHeader if x.renderInRequests ⇒
-            render(x)
+          case x: CustomHeader ⇒
+            if (x.renderInRequests) render(x)
             renderHeaders(tail, hostHeaderSeen, userAgentSeen, transferEncodingSeen)
 
           case x: RawHeader if (x is "content-type") || (x is "content-length") || (x is "transfer-encoding") ||

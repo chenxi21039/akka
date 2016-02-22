@@ -19,6 +19,7 @@ import akka.testkit.TestEvent.{ Mute, UnMute }
 import akka.testkit.{ EventFilter, TestDuration }
 import com.typesafe.config.ConfigFactory
 import org.reactivestreams.{ Publisher, Subscriber }
+import org.scalatest.concurrent.ScalaFutures
 import scala.collection.immutable
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -32,7 +33,8 @@ object FlowSpec {
 
 }
 
-class FlowSpec extends AkkaSpec(ConfigFactory.parseString("akka.actor.debug.receive=off\nakka.loglevel=INFO")) {
+class FlowSpec extends AkkaSpec(ConfigFactory.parseString("akka.actor.debug.receive=off\nakka.loglevel=INFO"))
+  with ScalaFutures {
   import FlowSpec._
 
   val settings = ActorMaterializerSettings(system)
@@ -312,12 +314,12 @@ class FlowSpec extends AkkaSpec(ConfigFactory.parseString("akka.actor.debug.rece
       val identity1 = Flow[Int].toProcessor
       val identity2 = Flow.fromProcessor(() ⇒ identity1.run())
       Await.result(
-        Source(1 to 10).via(identity2).grouped(100).runWith(Sink.head),
+        Source(1 to 10).via(identity2).limit(100).runWith(Sink.seq),
         3.seconds) should ===(1 to 10)
 
       // Reusable:
       Await.result(
-        Source(1 to 10).via(identity2).grouped(100).runWith(Sink.head),
+        Source(1 to 10).via(identity2).limit(100).runWith(Sink.seq),
         3.seconds) should ===(1 to 10)
     }
   }
@@ -534,6 +536,10 @@ class FlowSpec extends AkkaSpec(ConfigFactory.parseString("akka.actor.debug.rece
         downstream2.expectSubscriptionAndError().isInstanceOf[IllegalStateException] should be(true)
       }
     }
+
+    "should be created from a function easily" in {
+      Source(0 to 9).via(Flow.fromFunction(_ + 1)).runWith(Sink.seq).futureValue should ===(1 to 10)
+    }
   }
 
   "A broken Flow" must {
@@ -590,7 +596,7 @@ class FlowSpec extends AkkaSpec(ConfigFactory.parseString("akka.actor.debug.rece
 
     "suitably override attribute handling methods" in {
       import Attributes._
-      val f: Flow[Int, Int, NotUsed] = Flow[Int].withAttributes(asyncBoundary).addAttributes(none).named("")
+      val f: Flow[Int, Int, NotUsed] = Flow[Int].async.addAttributes(none).named("")
     }
   }
 

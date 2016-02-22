@@ -266,6 +266,17 @@ final class Sink[-In, +Mat](delegate: scaladsl.Sink[In, Mat]) extends Graph[Sink
     asScala.runWith(source)(materializer)
 
   /**
+   * Transform this Sink by applying a function to each *incoming* upstream element before
+   * it is passed to the [[Sink]]
+   *
+   * '''Backpressures when''' original [[Sink]] backpressures
+   *
+   * '''Cancels when''' original [[Sink]] backpressures
+   */
+  def contramap[In2](f: function.Function[In2, In]): Sink[In2, Mat] =
+    javadsl.Flow.fromFunction(f).toMat(this, Keep.right[NotUsed, Mat])
+
+  /**
    * Transform only the materialized value of this Sink, leaving all other properties as they were.
    */
   def mapMaterializedValue[Mat2](f: function.Function[Mat, Mat2]): Sink[In, Mat2] =
@@ -295,4 +306,11 @@ final class Sink[-In, +Mat](delegate: scaladsl.Sink[In, Mat]) extends Graph[Sink
    */
   override def named(name: String): javadsl.Sink[In, Mat] =
     new Sink(delegate.named(name))
+
+  /**
+   * Put an asynchronous boundary around this `Sink`
+   */
+  override def async: javadsl.Sink[In, Mat] =
+    new Sink(delegate.async)
+
 }

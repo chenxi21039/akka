@@ -16,7 +16,7 @@ This part also serves as supplementary material for the main body of documentati
 open while reading the manual and look for examples demonstrating various streaming concepts
 as they appear in the main body of documentation.
 
-If you need a quick reference of the available processing stages used in the recipes see :ref:`stages-overview`.
+If you need a quick reference of the available processing stages used in the recipes see :ref:`stages-overview_java`.
 
 Working with Flows
 ==================
@@ -54,16 +54,20 @@ collection itself, so we can just call ``mapConcat(l -> l)``.
 Draining a stream to a strict collection
 ----------------------------------------
 
-**Situation:** A finite sequence of elements is given as a stream, but a Scala collection is needed instead.
+**Situation:** A possibly unbounded sequence of elements is given as a stream, which needs to be collected into a Scala collection while ensuring boundedness
 
-In this recipe we will use the ``grouped`` stream operation that groups incoming elements into a stream of limited
-size collections (it can be seen as the almost opposite version of the "Flattening a stream of sequences" recipe
-we showed before). By using a ``grouped(MAX_ALLOWED_SIZE)`` we create a stream of groups
-with maximum size of ``MaxAllowedSeqSize`` and then we take the first element of this stream by attaching a ``Sink.head()``. What we get is a
-:class:`CompletionStage` containing a sequence with all the elements of the original up to ``MAX_ALLOWED_SIZE`` size (further
-elements are dropped).
+A common situation when working with streams is one where we need to collect incoming elements into a Scala collection.
+This operation is supported via ``Sink.seq`` which materializes into a ``CompletionStage<List<T>>``.
 
-.. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeToStrict.java#draining-to-list
+The function ``limit`` or ``take`` should always be used in conjunction in order to guarantee stream boundedness, thus preventing the program from running out of memory.
+
+For example, this is best avoided:
+
+.. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeSeq.java#draining-to-list-unsafe
+
+Rather, use ``limit`` or ``take`` to ensure that the resulting ``List`` will contain only up to ``MAX_ALLOWED_SIZE`` elements:
+
+.. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeSeq.java#draining-to-list-safe
 
 Calculating the digest of a ByteString stream
 ---------------------------------------------
@@ -71,17 +75,15 @@ Calculating the digest of a ByteString stream
 **Situation:** A stream of bytes is given as a stream of ``ByteStrings`` and we want to calculate the cryptographic digest
 of the stream.
 
-This recipe uses a :class:`PushPullStage` to host a mutable :class:`MessageDigest` class (part of the Java Cryptography
+This recipe uses a :class:`GraphStage` to host a mutable :class:`MessageDigest` class (part of the Java Cryptography
 API) and update it with the bytes arriving from the stream. When the stream starts, the ``onPull`` handler of the
 stage is called, which just bubbles up the ``pull`` event to its upstream. As a response to this pull, a ByteString
 chunk will arrive (``onPush``) which we use to update the digest, then it will pull for the next chunk.
 
 Eventually the stream of ``ByteStrings`` depletes and we get a notification about this event via ``onUpstreamFinish``.
-At this point we want to emit the digest value, but we cannot do it in this handler directly. Instead we call
-``ctx.absorbTermination()`` signalling to our context that we do not yet want to finish. When the environment decides that
-we can emit further elements ``onPull`` is called again, and we see ``ctx.isFinishing()`` returning ``true`` (since the upstream
-source has been depleted already). Since we only want to emit a final element it is enough to call ``ctx.pushAndFinish``
-passing the digest ByteString to be emitted.
+At this point we want to emit the digest value, but we cannot do it with ``push`` in this handler directly since there may
+be no downstream demand. Instead we call ``emit`` which will temporarily replace the handlers, emit the provided value when
+demand comes in and then reset the stage state. It will then complete the stage.
 
 .. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeDigest.java#calculating-digest
 
@@ -218,17 +220,17 @@ Dropping elements
 **Situation:** Given a fast producer and a slow consumer, we want to drop elements if necessary to not slow down
 the producer too much.
 
-This can be solved by using the most versatile rate-transforming operation, ``conflate``. Conflate can be thought as
-a special ``fold`` operation that collapses multiple upstream elements into one aggregate element if needed to keep
+This can be solved by using a versatile rate-transforming operation, ``conflate``. Conflate can be thought as
+a special ``reduce`` operation that collapses multiple upstream elements into one aggregate element if needed to keep
 the speed of the upstream unaffected by the downstream.
 
-When the upstream is faster, the fold process of the ``conflate`` starts. This folding needs a zero element, which
-is given by a ``seed`` function that takes the current element and produces a zero for the folding process. In our
-case this is ``i -> i`` so our folding state starts form the message itself. The folder function is also
-special: given the aggregate value (the last message) and the new element (the freshest element) our aggregate state
-becomes simply the freshest element. This choice of functions results in a simple dropping operation.
+When the upstream is faster, the reducing process of the ``conflate`` starts. Our reducer function simply takes
+the freshest element. This cin a simple dropping operation.
 
 .. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeSimpleDrop.java#simple-drop
+
+There is a version of ``conflate`` named ``conflateWithSeed`` that allows to express more complex aggregations, more
+similar to a ``fold``.
 
 Dropping broadcast
 ------------------
@@ -253,7 +255,7 @@ Collecting missed ticks
 **Situation:** Given a regular (stream) source of ticks, instead of trying to backpressure the producer of the ticks
 we want to keep a counter of the missed ticks instead and pass it down when possible.
 
-We will use ``conflate`` to solve the problem. Conflate takes two functions:
+We will use ``conflateWithSeed`` to solve the problem. Conflate takes two functions:
 
 * A seed function that produces the zero element for the folding process that happens when the upstream is faster than
   the downstream. In our case the seed function is a constant function that returns 0 since there were no missed ticks
@@ -274,14 +276,11 @@ Create a stream processor that repeats the last element seen
 of them is slowing down the other by dropping earlier unconsumed elements from the upstream if necessary, and repeating
 the last value for the downstream if necessary.
 
-We have two options to implement this feature. In both cases we will use :class:`DetachedStage` to build our custom
-element (:class:`DetachedStage` is specifically designed for rate translating elements just like ``conflate``,
-``expand`` or ``buffer``). In the first version we will use a provided initial value ``initial`` that will be used
+We have two options to implement this feature. In both cases we will use :class:`GraphStage` to build our custom
+element. In the first version we will use a provided initial value ``initial`` that will be used
 to feed the downstream if no upstream element is ready yet. In the ``onPush()`` handler we just overwrite the
-``currentValue`` variable and immediately relieve the upstream by calling ``pull()`` (remember, implementations of
-:class:`DetachedStage` are not allowed to call ``push()`` as a response to ``onPush()`` or call ``pull()`` as a response
-of ``onPull()``). The downstream ``onPull`` handler is very similar, we immediately relieve the downstream by
-emitting ``currentValue``.
+``currentValue`` variable and immediately relieve the upstream by calling ``pull()``. The downstream ``onPull`` handler
+is very similar, we immediately relieve the downstream by emitting ``currentValue``.
 
 .. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeHold.java#hold-version-1
 
@@ -292,9 +291,9 @@ case: if the very first element is not yet available.
 We introduce a boolean variable ``waitingFirstValue`` to denote whether the first element has been provided or not
 (alternatively an :class:`Optional` can be used for ``currentValue`` or if the element type is a subclass of Object
 a null can be used with the same purpose). In the downstream ``onPull()`` handler the difference from the previous
-version is that we call ``holdDownstream()`` if the first element is not yet available and thus blocking our downstream. The
-upstream ``onPush()`` handler sets ``waitingFirstValue`` to false, and after checking if ``holdDownstream()`` has been called it
-either relieves the upstream producer, or both the upstream producer and downstream consumer by calling ``pushAndPull()``
+version is that we check if we have received the the first value and only emit if we have. This leads to that when the
+first element comes in we must check if there possibly already was demand from downstream so that we in that case can
+push the element directly.
 
 .. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeHold.java#hold-version-2
 
@@ -339,14 +338,14 @@ Chunking up a stream of ByteStrings into limited size ByteStrings
 the same sequence, but capping the size of ByteStrings. In other words we want to slice up ByteStrings into smaller
 chunks if they exceed a size threshold.
 
-This can be achieved with a single :class:`PushPullStage`. The main logic of our stage is in ``emitChunkOrPull()``
+This can be achieved with a single :class:`GraphStage`. The main logic of our stage is in ``emitChunk()``
 which implements the following logic:
 
-* if the buffer is empty, we pull for more bytes
+* if the buffer is empty, and upstream is not closed we pull for more bytes, if it is closed we complete
 * if the buffer is nonEmpty, we split it according to the ``chunkSize``. This will give a next chunk that we will emit,
   and an empty or nonempty remaining buffer.
 
-Both ``onPush()`` and ``onPull()`` calls ``emitChunkOrPull()`` the only difference is that the push handler also stores
+Both ``onPush()`` and ``onPull()`` calls ``emitChunk()`` the only difference is that the push handler also stores
 the incoming chunk by appending to the end of the buffer.
 
 .. includecode:: ../code/docs/stream/javadsl/cookbook/RecipeByteStrings.java#bytestring-chunker
@@ -359,7 +358,7 @@ Limit the number of bytes passing through a stream of ByteStrings
 **Situation:** Given a stream of ByteStrings we want to fail the stream if more than a given maximum of bytes has been
 consumed.
 
-This recipe uses a :class:`PushStage` to implement the desired feature. In the only handler we override,
+This recipe uses a :class:`GraphStage` to implement the desired feature. In the only handler we override,
 ``onPush()`` we just update a counter and see if it gets larger than ``maximumBytes``. If a violation happens
 we signal failure, otherwise we forward the chunk we have received.
 

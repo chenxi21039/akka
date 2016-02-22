@@ -10,7 +10,7 @@ import java.nio.channels.FileChannel
 import akka.Done
 import akka.actor.{ Deploy, ActorLogging, DeadLetterSuppression, Props }
 import akka.stream.actor.ActorPublisherMessage
-import akka.stream.io.IOResult
+import akka.stream.IOResult
 import akka.util.ByteString
 
 import scala.annotation.tailrec
@@ -83,7 +83,7 @@ private[akka] final class FilePublisher(f: File, completionPromise: Promise[IORe
 
   /** BLOCKING I/O READ */
   @tailrec def readAhead(maxChunks: Int, chunks: Vector[ByteString]): Vector[ByteString] =
-    if (chunks.size <= maxChunks && isActive) {
+    if (chunks.size <= maxChunks && isActive && !eofEncountered) {
       (try chan.read(buf) catch { case NonFatal(ex) ⇒ onErrorThenStop(ex); Int.MinValue }) match {
         case -1 ⇒ // EOF
           eofReachedAtOffset = chan.position

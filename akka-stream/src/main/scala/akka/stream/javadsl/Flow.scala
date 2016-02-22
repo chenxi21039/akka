@@ -3,6 +3,7 @@
  */
 package akka.stream.javadsl
 
+import akka.stream.impl.fusing.RecoverWith
 import akka.{ NotUsed, Done }
 import akka.event.LoggingAdapter
 import akka.japi.{ function, Pair }
@@ -34,6 +35,13 @@ object Flow {
       val javaPair = processorFactory.create()
       (javaPair.first, javaPair.second)
     })
+
+  /**
+   * Creates a [Flow] which will use the given function to transform its inputs to outputs. It is equivalent
+   * to `Flow.create[T].map(f)`
+   */
+  def fromFunction[I, O](f: function.Function[I, O]): javadsl.Flow[I, O, NotUsed] =
+    Flow.create[I]().map(f)
 
   /** Create a `Flow` which can process elements of type `T`. */
   def of[T](clazz: Class[T]): javadsl.Flow[T, T, NotUsed] = create[T]()
@@ -117,47 +125,6 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    */
   def viaMat[T, M, M2](flow: Graph[FlowShape[Out, T], M], combine: function.Function2[Mat, M, M2]): javadsl.Flow[In, T, M2] =
     new Flow(delegate.viaMat(flow)(combinerToScala(combine)))
-
-  /**
-   * Transform this [[Flow]] by appending the given processing steps, ensuring
-   * that an `asyncBoundary` attribute is set around those steps.
-   * {{{
-   *     +----------------------------+
-   *     | Resulting Flow             |
-   *     |                            |
-   *     |  +------+        +------+  |
-   *     |  |      |        |      |  |
-   * In ~~> | this | ~Out~> | flow | ~~> T
-   *     |  |      |        |      |  |
-   *     |  +------+        +------+  |
-   *     +----------------------------+
-   * }}}
-   * The materialized value of the combined [[Flow]] will be the materialized
-   * value of the current flow (ignoring the other Flow’s value), use
-   * `viaMat` if a different strategy is needed.
-   */
-  def viaAsync[T, M](flow: Graph[FlowShape[Out, T], M]): javadsl.Flow[In, T, Mat] =
-    new Flow(delegate.viaAsync(flow))
-
-  /**
-   * Transform this [[Flow]] by appending the given processing steps, ensuring
-   * that an `asyncBoundary` attribute is set around those steps.
-   * {{{
-   *     +----------------------------+
-   *     | Resulting Flow             |
-   *     |                            |
-   *     |  +------+        +------+  |
-   *     |  |      |        |      |  |
-   * In ~~> | this | ~Out~> | flow | ~~> T
-   *     |  |      |        |      |  |
-   *     |  +------+        +------+  |
-   *     +----------------------------+
-   * }}}
-   * The `combine` function is used to compose the materialized values of this flow and that
-   * flow into the materialized value of the resulting Flow.
-   */
-  def viaAsyncMat[T, M, M2](flow: Graph[FlowShape[Out, T], M], combine: function.Function2[Mat, M, M2]): javadsl.Flow[In, T, M2] =
-    new Flow(delegate.viaAsyncMat(flow)(combinerToScala(combine)))
 
   /**
    * Connect this [[Flow]] to a [[Sink]], concatenating the processing steps of both.
@@ -314,12 +281,42 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * '''Backpressures when''' downstream backpressures or there are still remaining elements from the
    * previously calculated collection
    *
-   * '''Completes when''' upstream completes and all remaining elements has been emitted
+   * '''Completes when''' upstream completes and all remaining elements have been emitted
    *
    * '''Cancels when''' downstream cancels
    */
   def mapConcat[T](f: function.Function[Out, java.lang.Iterable[T]]): javadsl.Flow[In, T, Mat] =
     new Flow(delegate.mapConcat { elem ⇒ Util.immutableSeq(f(elem)) })
+
+  /**
+   * Transform each input element into an `Iterable` of output elements that is
+   * then flattened into the output stream. The transformation is meant to be stateful,
+   * which is enabled by creating the transformation function anew for every materialization —
+   * the returned function will typically close over mutable objects to store state between
+   * invocations. For the stateless variant see [[#mapConcat]].
+   *
+   * Make sure that the `Iterable` is immutable or at least not modified after
+   * being used as an output sequence. Otherwise the stream may fail with
+   * `ConcurrentModificationException` or other more subtle errors may occur.
+   *
+   * The returned `Iterable` MUST NOT contain `null` values,
+   * as they are illegal as stream elements - according to the Reactive Streams specification.
+   *
+   * '''Emits when''' the mapping function returns an element or there are still remaining elements
+   * from the previously calculated collection
+   *
+   * '''Backpressures when''' downstream backpressures or there are still remaining elements from the
+   * previously calculated collection
+   *
+   * '''Completes when''' upstream completes and all remaining elements has been emitted
+   *
+   * '''Cancels when''' downstream cancels
+   */
+  def statefulMapConcat[T](f: function.Creator[function.Function[Out, java.lang.Iterable[T]]]): javadsl.Flow[In, T, Mat] =
+    new Flow(delegate.statefulMapConcat { () ⇒
+      val fun = f.create()
+      elem ⇒ Util.immutableSeq(fun(elem))
+    })
 
   /**
    * Transform this stream by applying the given function to each of the elements
@@ -343,14 +340,14 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * '''Backpressures when''' the number of futures reaches the configured parallelism and the downstream
    * backpressures or the first future is not completed
    *
-   * '''Completes when''' upstream completes and all futures has been completed and all elements has been emitted
+   * '''Completes when''' upstream completes and all futures have been completed and all elements have been emitted
    *
    * '''Cancels when''' downstream cancels
    *
    * @see [[#mapAsyncUnordered]]
    */
   def mapAsync[T](parallelism: Int, f: function.Function[Out, CompletionStage[T]]): javadsl.Flow[In, T, Mat] =
-    new Flow(delegate.mapAsync(parallelism)(x => f(x).toScala))
+    new Flow(delegate.mapAsync(parallelism)(x ⇒ f(x).toScala))
 
   /**
    * Transform this stream by applying the given function to each of the elements
@@ -375,14 +372,14 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *
    * '''Backpressures when''' the number of futures reaches the configured parallelism and the downstream backpressures
    *
-   * '''Completes when''' upstream completes and all futures has been completed and all elements has been emitted
+   * '''Completes when''' upstream completes and all futures have been completed and all elements have been emitted
    *
    * '''Cancels when''' downstream cancels
    *
    * @see [[#mapAsync]]
    */
   def mapAsyncUnordered[T](parallelism: Int, f: function.Function[Out, CompletionStage[T]]): javadsl.Flow[In, T, Mat] =
-    new Flow(delegate.mapAsyncUnordered(parallelism)(x => f(x).toScala))
+    new Flow(delegate.mapAsyncUnordered(parallelism)(x ⇒ f(x).toScala))
 
   /**
    * Only pass on those elements that satisfy the given predicate.
@@ -464,6 +461,8 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *
    * '''Completes when''' the defined number of elements has been taken or upstream completes
    *
+   * '''Errors when''' the total number of incoming element exceeds max
+   *
    * '''Cancels when''' the defined number of elements has been taken or downstream cancels
    *
    * See also [[Flow.take]], [[Flow.takeWithin]], [[Flow.takeWhile]]
@@ -488,6 +487,8 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * '''Backpressures when''' downstream backpressures
    *
    * '''Completes when''' the defined number of elements has been taken or upstream completes
+   *
+   * '''Errors when''' when the accumulated cost exceeds max
    *
    * '''Cancels when''' the defined number of elements has been taken or downstream cancels
    *
@@ -670,7 +671,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *  * DropHead, DropTail, DropBuffer - never backpressures
    *  * Fail - fails the stream if buffer gets full
    *
-   * '''Completes when''' upstream completes and buffered elements has been drained
+   * '''Completes when''' upstream completes and buffered elements have been drained
    *
    * '''Cancels when''' downstream cancels
    *
@@ -761,6 +762,27 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
     new Flow(delegate.recover(pf))
 
   /**
+   * RecoverWith allows to switch to alternative Source on flow failure. It will stay in effect after
+   * a failure has been recovered so that each time there is a failure it is fed into the `pf` and a new
+   * Source may be materialized.
+   *
+   * Since the underlying failure signal onError arrives out-of-band, it might jump over existing elements.
+   * This stage can recover the failure signal, but not the skipped elements, which will be dropped.
+   *
+   * '''Emits when''' element is available from the upstream or upstream is failed and element is available
+   * from alternative Source
+   *
+   * '''Backpressures when''' downstream backpressures
+   *
+   * '''Completes when''' upstream completes or upstream failed with exception pf can handle
+   *
+   * '''Cancels when''' downstream cancels
+   *
+   */
+  def recoverWith[T >: Out](pf: PartialFunction[Throwable, _ <: Graph[SourceShape[T], NotUsed]]): javadsl.Flow[In, T, Mat @uncheckedVariance] =
+    new Flow(delegate.recoverWith(pf))
+
+  /**
    * Terminate processing (and cancel the upstream publisher) after the given
    * number of elements. Due to input buffering some elements may have been
    * requested from upstream publishers that will then not be processed downstream
@@ -809,6 +831,9 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * until the subscriber is ready to accept them. For example a conflate step might average incoming numbers if the
    * upstream publisher is faster.
    *
+   * This version of conflate allows to derive a seed from the first element and change the aggregated type to be
+   * different than the input type. See [[Flow.conflate]] for a simpler version that does not change types.
+   *
    * This element only rolls up elements if the upstream is faster, but if the downstream is faster it will not
    * duplicate elements.
    *
@@ -820,14 +845,41 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *
    * '''Cancels when''' downstream cancels
    *
-   * see also [[Flow.batch]] [[Flow.batchWeighted]]
+   * see also [[Flow.conflate]] [[Flow.batch]] [[Flow.batchWeighted]]
    *
    * @param seed Provides the first state for a conflated value using the first unconsumed element as a start
    * @param aggregate Takes the currently aggregated value and the current pending element to produce a new aggregate
    *
    */
-  def conflate[S](seed: function.Function[Out, S], aggregate: function.Function2[S, Out, S]): javadsl.Flow[In, S, Mat] =
-    new Flow(delegate.conflate(seed.apply)(aggregate.apply))
+  def conflateWithSeed[S](seed: function.Function[Out, S], aggregate: function.Function2[S, Out, S]): javadsl.Flow[In, S, Mat] =
+    new Flow(delegate.conflateWithSeed(seed.apply)(aggregate.apply))
+
+  /**
+   * Allows a faster upstream to progress independently of a slower subscriber by conflating elements into a summary
+   * until the subscriber is ready to accept them. For example a conflate step might average incoming numbers if the
+   * upstream publisher is faster.
+   *
+   * This version of conflate does not change the output type of the stream. See [[Flow.conflateWithSeed]] for a
+   * more flexible version that can take a seed function and transform elements while rolling up.
+   *
+   * This element only rolls up elements if the upstream is faster, but if the downstream is faster it will not
+   * duplicate elements.
+   *
+   * '''Emits when''' downstream stops backpressuring and there is a conflated element available
+   *
+   * '''Backpressures when''' never
+   *
+   * '''Completes when''' upstream completes
+   *
+   * '''Cancels when''' downstream cancels
+   *
+   * see also [[Flow.conflateWithSeed]] [[Flow.batch]] [[Flow.batchWeighted]]
+   *
+   * @param aggregate Takes the currently aggregated value and the current pending element to produce a new aggregate
+   *
+   */
+  def conflate[O2 >: Out](aggregate: function.Function2[O2, O2, O2]): javadsl.Flow[In, O2, Mat] =
+    new Flow(delegate.conflate(aggregate.apply))
 
   /**
    * Allows a faster upstream to progress independently of a slower subscriber by aggregating elements into batches
@@ -924,7 +976,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *  * DropHead, DropTail, DropBuffer - never backpressures
    *  * Fail - fails the stream if buffer gets full
    *
-   * '''Completes when''' upstream completes and buffered elements has been drained
+   * '''Completes when''' upstream completes and buffered elements have been drained
    *
    * '''Cancels when''' downstream cancels
    *
@@ -949,7 +1001,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * of an empty collection and a stream containing the whole upstream unchanged.
    *
    * In case of an upstream error, depending on the current state
-   *  - the master stream signals the error if less than `n` elements has been seen, and therefore the substream
+   *  - the master stream signals the error if less than `n` elements have been seen, and therefore the substream
    *    has not yet been emitted
    *  - the tail substream signals the error after the prefix and tail has been emitted by the main stream
    *    (at that point the main stream has already completed)
@@ -959,7 +1011,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *
    * '''Backpressures when''' downstream backpressures or substream backpressures
    *
-   * '''Completes when''' prefix elements has been consumed and substream has been consumed
+   * '''Completes when''' prefix elements have been consumed and substream has been consumed
    *
    * '''Cancels when''' downstream cancels or substream cancels
    */
@@ -1057,12 +1109,23 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *
    * '''Completes when''' upstream completes
    *
-   * '''Cancels when''' downstream cancels and substreams cancel
+   * '''Cancels when''' downstream cancels and substreams cancel on `SubstreamCancelStrategy.drain()`, downstream
+   * cancels or any substream cancels on `SubstreamCancelStrategy.propagate()`
    *
    * See also [[Flow.splitAfter]].
    */
   def splitWhen(p: function.Predicate[Out]): SubFlow[In, Out, Mat] =
     new SubFlow(delegate.splitWhen(p.test))
+
+  /**
+   * This operation applies the given predicate to all incoming elements and
+   * emits them to a stream of output streams, always beginning a new one with
+   * the current element if the given predicate returns true for it.
+   *
+   * @see [[#splitWhen]]
+   */
+  def splitWhen(substreamCancelStrategy: SubstreamCancelStrategy)(p: function.Predicate[Out]): SubFlow[In, Out, Mat] =
+    new SubFlow(delegate.splitWhen(substreamCancelStrategy)(p.test))
 
   /**
    * This operation applies the given predicate to all incoming elements and
@@ -1104,12 +1167,23 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    *
    * '''Completes when''' upstream completes
    *
-   * '''Cancels when''' downstream cancels and substreams cancel
+   * '''Cancels when''' downstream cancels and substreams cancel on `SubstreamCancelStrategy.drain`, downstream
+   * cancels or any substream cancels on `SubstreamCancelStrategy.propagate`
    *
    * See also [[Flow.splitWhen]].
    */
   def splitAfter[U >: Out](p: function.Predicate[Out]): SubFlow[In, Out, Mat] =
     new SubFlow(delegate.splitAfter(p.test))
+
+  /**
+   * This operation applies the given predicate to all incoming elements and
+   * emits them to a stream of output streams. It *ends* the current substream when the
+   * predicate is true.
+   *
+   * @see [[#splitAfter]]
+   */
+  def splitAfter(substreamCancelStrategy: SubstreamCancelStrategy)(p: function.Predicate[Out]): SubFlow[In, Out, Mat] =
+    new SubFlow(delegate.splitAfter(substreamCancelStrategy)(p.test))
 
   /**
    * Transform each input element into a `Source` of output elements that is
@@ -1368,7 +1442,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
   /**
    * Combine the elements of current [[Flow]] and the given [[Source]] into a stream of tuples.
    *
-   * '''Emits when''' all of the inputs has an element available
+   * '''Emits when''' all of the inputs have an element available
    *
    * '''Backpressures when''' downstream backpressures
    *
@@ -1387,7 +1461,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
   def zipMat[T, M, M2](that: Graph[SourceShape[T], M],
                        matF: function.Function2[Mat, M, M2]): javadsl.Flow[In, Out @uncheckedVariance Pair T, M2] =
     this.viaMat(Flow.fromGraph(GraphDSL.create(that,
-      new function.Function2[GraphDSL.Builder[M], SourceShape[T], FlowShape[Out, Out @uncheckedVariance Pair T]] {
+      new function.Function2[GraphDSL.Builder[M], SourceShape[T], FlowShape[Out, Out @ uncheckedVariance Pair T]] {
         def apply(b: GraphDSL.Builder[M], s: SourceShape[T]): FlowShape[Out, Out @uncheckedVariance Pair T] = {
           val zip: FanInShape2[Out, T, Out Pair T] = b.add(Zip.create[Out, T])
           b.from(s).toInlet(zip.in1)
@@ -1399,7 +1473,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * Put together the elements of current [[Flow]] and the given [[Source]]
    * into a stream of combined elements using a combiner function.
    *
-   * '''Emits when''' all of the inputs has an element available
+   * '''Emits when''' all of the inputs have an element available
    *
    * '''Backpressures when''' downstream backpressures
    *
@@ -1495,7 +1569,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * Tokens drops into the bucket at a given rate and can be `spared` for later use up to bucket capacity
    * to allow some burstyness. Whenever stream wants to send an element, it takes as many
    * tokens from the bucket as number of elements. If there isn't any, throttle waits until the
-   * bucket accumulates enough tokens.
+   * bucket accumulates enough tokens. Bucket is full when stream just materialized and started.
    *
    * Parameter `mode` manages behaviour when upstream is faster than throttle rate:
    *  - [[akka.stream.ThrottleMode.Shaping]] makes pauses before emitting messages to meet throttle rate
@@ -1564,7 +1638,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    * downstream.
    */
   def watchTermination[M]()(matF: function.Function2[Mat, CompletionStage[Done], M]): javadsl.Flow[In, Out, M] =
-    new Flow(delegate.watchTermination()((left, right) => matF(left, right.toJava)))
+    new Flow(delegate.watchTermination()((left, right) ⇒ matF(left, right.toJava)))
 
   /**
    * Delays the initial element by the specified duration.
@@ -1604,6 +1678,12 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    */
   override def named(name: String): javadsl.Flow[In, Out, Mat] =
     new Flow(delegate.named(name))
+
+  /**
+   * Put an asynchronous boundary around this `Flow`
+   */
+  override def async: javadsl.Flow[In, Out, Mat] =
+    new Flow(delegate.async)
 
   /**
    * Logs elements flowing through the stream as well as completion and erroring.

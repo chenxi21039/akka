@@ -23,6 +23,7 @@ private[stream] object Stages {
 
   object DefaultAttributes {
     val IODispatcher = ActorAttributes.Dispatcher("akka.stream.default-blocking-io-dispatcher")
+    val inputBufferOne = inputBuffer(initial = 1, max = 1)
 
     val fused = name("fused")
     val materializedValueSource = name("matValueSource")
@@ -52,7 +53,7 @@ private[stream] object Stages {
     val batch = name("batch")
     val batchWeighted = name("batchWeighted")
     val expand = name("expand")
-    val mapConcat = name("mapConcat")
+    val statefulMapConcat = name("statefulMapConcat")
     val detacher = name("detacher")
     val groupBy = name("groupBy")
     val prefixAndTail = name("prefixAndTail")
@@ -65,6 +66,7 @@ private[stream] object Stages {
     val merge = name("merge")
     val mergePreferred = name("mergePreferred")
     val flattenMerge = name("flattenMerge")
+    val recoverWith = name("recoverWith")
     val broadcast = name("broadcast")
     val balance = name("balance")
     val zip = name("zip")
@@ -97,14 +99,16 @@ private[stream] object Stages {
 
     val subscriberSink = name("subscriberSink")
     val cancelledSink = name("cancelledSink")
-    val headSink = name("headSink") and inputBuffer(initial = 1, max = 1)
-    val headOptionSink = name("headOptionSink") and inputBuffer(initial = 1, max = 1)
+    val headSink = name("headSink") and inputBufferOne
+    val headOptionSink = name("headOptionSink") and inputBufferOne
     val lastSink = name("lastSink")
     val lastOptionSink = name("lastOptionSink")
+    val seqSink = name("seqSink")
     val publisherSink = name("publisherSink")
     val fanoutPublisherSink = name("fanoutPublisherSink")
     val ignoreSink = name("ignoreSink")
     val actorRefSink = name("actorRefSink")
+    val actorRefWithAck = name("actorRefWithAckSink")
     val actorSubscriberSink = name("actorSubscriberSink")
     val queueSink = name("queueSink")
     val outputStreamSink = name("outputStreamSink") and IODispatcher
@@ -203,14 +207,6 @@ private[stream] object Stages {
   final case class Buffer[T](size: Int, overflowStrategy: OverflowStrategy, attributes: Attributes = buffer) extends SymbolicStage[T, T] {
     require(size > 0, s"Buffer size must be larger than zero but was [$size]")
     override def create(attr: Attributes): Stage[T, T] = fusing.Buffer(size, overflowStrategy)
-  }
-
-  final case class Conflate[In, Out](seed: In ⇒ Out, aggregate: (Out, In) ⇒ Out, attributes: Attributes = conflate) extends SymbolicStage[In, Out] {
-    override def create(attr: Attributes): Stage[In, Out] = fusing.Conflate(seed, aggregate, supervision(attr))
-  }
-
-  final case class MapConcat[In, Out](f: In ⇒ immutable.Iterable[Out], attributes: Attributes = mapConcat) extends SymbolicStage[In, Out] {
-    override def create(attr: Attributes): Stage[In, Out] = fusing.MapConcat(f, supervision(attr))
   }
 
   // FIXME: These are not yet proper stages, therefore they use the deprecated StageModule infrastructure

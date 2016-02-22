@@ -22,9 +22,9 @@ the ``PatternCS`` class that provide the ability to interact between Actors and 
 
 Should you have the need to use Scala Futures with these new Java APIs please use
 the ``scala-java8-compat`` library that comes as a dependency of Akka. For more
-information see `the documentation``_.
+information see `the documentation`__.
 
-.. _`the documentation`:: https://github.com/scala/scala-java8-compat
+__ https://github.com/scala/scala-java8-compat
 
 akka.Done and akka.NotUsed replacing Unit and BoxedUnit
 -------------------------------------------------------
@@ -92,6 +92,33 @@ In Akka 2.4.x this is formulated like so:
 
 .. includecode:: ../code/docs/stream/MigrationsJava.java#expand-state
 
+``conflate`` has been renamed to ``conflateWithSeed()``
+-------------------------------------------------------
+
+The new ``conflate`` operator is a special case of the original behavior (renamed to ``conflateWithSeed``) that does not
+change the type of the stream. The usage of the new operator is as simple as::
+
+   Flow.of(Integer.class).conflate((a, b) -> a + b) // Add numbers while downstream is not ready
+
+Which is the same as using ``conflateWithSeed`` with an identity function::
+
+   Flow.of(Integer.class).conflateWithSeed(x -> x, (a, b) -> a + b) // Add numbers while downstream is not ready
+
+
+``viaAsync`` and ``viaAsyncMat`` has been replaced with ``async()``
+-------------------------------------------------------------------
+``async()`` is available from ``Sink``, ``Source``, ``Flow`` and the sub flows. It provides a shortcut for
+setting the attribute ``Attributes.asyncBoundary`` on a flow. The existing methods ``Flow.viaAsync`` and
+``Flow.viaAsyncMat`` has been removed to make marking out asynchronous boundaries more consistent::
+
+    // This no longer works
+    source.viaAsync(flow)
+
+In Akka 2.4.x this will instead look lile this:
+
+.. includecode:: ../code/docs/stream/MigrationsJava.java#async
+
+
 Changed Sources / Sinks
 =======================
 
@@ -144,3 +171,59 @@ Routing settings parameter name
 and were accessible via ``settings``. We now made it possible to configure the parsers
 settings as well, so ``RoutingSettings`` is now ``routingSettings`` and ``ParserSettings`` is
 now accessible via ``parserSettings``.
+
+Client / server behaviour on cancelled entity
+---------------------------------------------
+
+Previously if request or response were cancelled or consumed only partially
+(e.g. by using ``take`` combinator) the remaining data was silently drained to prevent stalling
+the connection, since there could still be more requests / responses incoming. Now the default
+behaviour is to close the connection in order to prevent using excessive resource usage in case
+of huge entities.
+
+The old behaviour can be achieved by explicitly draining the entity:
+
+   response.entity().getDataBytes().runWith(Sink.ignore())
+
+SslTls has been renamed to TLS and moved
+----------------------------------------
+
+The DSL to access a TLS (or SSL) :class:`BidiFlow` have now split between the ``javadsl`` and ``scaladsl`` packages and
+have been renamed to :class:`TLS`. Common option types (closing modes, authentication modes, etc.) have been moved to
+the top level ``stream`` package, and the common message types are accessible in the class :class:`akka.stream.TLSProtocol`
+
+Websocket now consistently named WebSocket
+------------------------------------------
+
+Previously we had a mix of methods and classes called ``websocket`` or ``Websocket``, which was in contradiction with
+how the word is spelled in the spec and some other places of Akka HTTP.
+
+Methods and classes using the word WebSocket now consistently use it as ``WebSocket``, so updating is as simple as
+find-and-replacing the lower-case ``s`` to an upper-case ``S`` wherever the word WebSocket appeared.
+
+Java DSL for Http binding and connections changed
+-------------------------------------------------
+
+In order to minimise the number of needed overloads for each method defined on the ``Http`` extension
+a new mini-DSL has been introduced for connecting to hosts given a hostname, port and optional ``ConnectionContext``.
+
+The availability of the connection context (if it's set to ``HttpsConnectionContext``) makes the server be bound
+as an HTTPS server, and for outgoing connections those settings are used instead of the default ones if provided.
+
+Was::
+
+    http.cachedHostConnectionPool(toHost("akka.io"), materializer());
+    http.cachedHostConnectionPool("akka.io", 80, httpsConnectionContext, materializer()); // does not work anymore
+
+Replace with::
+
+    http.cachedHostConnectionPool(toHostHttps("akka.io", 8081), materializer());
+    http.cachedHostConnectionPool(toHostHttps("akka.io", 8081).withCustomHttpsContext(httpsContext), materializer());
+
+
+Framing moved to akka.stream.[javadsl/scaladsl]
+-----------------------------------------------
+
+The ``Framing`` object which can be used to chunk up ``ByteString`` streams into
+framing dependent chunks (such as lines) has moved to ``akka.stream.scaladsl.Framing``,
+and has gotten a Java DSL equivalent type in ``akka.stream.javadsl.Framing``.
