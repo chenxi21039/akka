@@ -1,14 +1,11 @@
 /**
- * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 package akka.stream.impl.fusing
 
-import akka.NotUsed
 import akka.stream.impl.ConstantFun
-import akka.stream.{ Attributes, Shape, Supervision }
-import akka.stream.stage.AbstractStage.PushPullGraphStage
-import akka.stream.stage.GraphStageWithMaterializedValue
-import akka.stream.testkit.AkkaSpec
+import akka.stream.Supervision
+import akka.testkit.AkkaSpec
 
 class InterpreterStressSpec extends AkkaSpec with GraphInterpreterSpecKit {
   import Supervision.stoppingDecider

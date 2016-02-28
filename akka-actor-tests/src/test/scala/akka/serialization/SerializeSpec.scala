@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.serialization
@@ -318,7 +318,6 @@ class ReferenceSerializationSpec extends AkkaSpec(SerializationTests.mostlyRefer
 
 @org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class SerializationCompatibilitySpec extends AkkaSpec(SerializationTests.mostlyReferenceSystem) {
-  import SerializationTests._
 
   val ser = SerializationExtension(system)
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.http.impl.engine.ws
@@ -101,7 +101,7 @@ object WebSocketClientBlueprint {
                   }
                 case Left(problem) ⇒
                   result.success(InvalidUpgradeResponse(response, s"WebSocket server at $uri returned $problem"))
-                  ctx.fail(throw new IllegalArgumentException(s"WebSocket upgrade did not finish because of '$problem'"))
+                  ctx.fail(new IllegalArgumentException(s"WebSocket upgrade did not finish because of '$problem'"))
               }
             case other ⇒
               throw new IllegalStateException(s"unexpected element of type ${other.getClass}")

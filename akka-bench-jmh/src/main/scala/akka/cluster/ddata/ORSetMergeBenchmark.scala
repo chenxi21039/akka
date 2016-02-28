@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2015-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 package akka.cluster.ddata
 
@@ -13,7 +13,6 @@ import org.openjdk.jmh.annotations.OutputTimeUnit
 import org.openjdk.jmh.annotations.{ Scope => JmhScope }
 import org.openjdk.jmh.annotations.State
 import org.openjdk.jmh.annotations.Warmup
-import akka.actor.ActorPath
 import akka.cluster.UniqueAddress
 import akka.actor.Address
 import org.openjdk.jmh.annotations.Param

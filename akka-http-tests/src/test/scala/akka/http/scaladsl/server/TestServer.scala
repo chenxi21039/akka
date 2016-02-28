@@ -1,12 +1,11 @@
 /*
- * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
 
 import akka.http.scaladsl.marshallers.xml.ScalaXmlSupport
 import akka.http.scaladsl.server.directives.Credentials
-import akka.stream.scaladsl._
 import com.typesafe.config.{ ConfigFactory, Config }
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer

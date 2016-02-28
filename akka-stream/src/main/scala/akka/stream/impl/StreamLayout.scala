@@ -1,9 +1,9 @@
 /**
- * Copyright (C) 2015-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 package akka.stream.impl
 
-import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicReference }
 import java.{ util ⇒ ju }
 import akka.NotUsed
 import akka.stream.impl.MaterializerSession.MaterializationPanic
@@ -527,7 +527,7 @@ private[stream] final class VirtualProcessor[T] extends Processor[T, T] {
 }
 
 /**
- * INERNAL API
+ * INTERNAL API
  */
 private[stream] object MaterializerSession {
   class MaterializationPanic(cause: Throwable) extends RuntimeException("Materialization aborted.", cause) with NoStackTrace

@@ -1,9 +1,8 @@
 /**
- * Copyright (C) 2014-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 package akka.stream.impl
 
-import java.util.concurrent.atomic.AtomicReference
 import akka.{ Done, NotUsed }
 import akka.actor.{ ActorRef, Props }
 import akka.stream.Attributes.InputBuffer
@@ -15,7 +14,6 @@ import org.reactivestreams.{ Publisher, Subscriber }
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.immutable
 import scala.concurrent.{ Future, Promise }
-import scala.language.postfixOps
 import scala.util.{ Failure, Success, Try }
 import akka.stream.scaladsl.SinkQueue
 import java.util.concurrent.CompletionStage

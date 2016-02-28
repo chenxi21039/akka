@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.http.impl.engine.ws
@@ -9,7 +9,6 @@ import akka.NotUsed
 import scala.concurrent.duration._
 import scala.util.Random
 import org.scalatest.{ Matchers, FreeSpec }
-import akka.stream.FlowShape
 import akka.stream.scaladsl._
 import akka.stream.testkit._
 import akka.util.ByteString
