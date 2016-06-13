@@ -14,7 +14,6 @@ import akka.pattern.ask
 import akka.actor.Terminated
 import akka.actor.ActorRef
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
 
   def routeeSize(router: ActorRef): Int =
@@ -65,7 +64,7 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
 
       for (_ ← 1 to iterationCount; _ ← 1 to connectionCount) {
         val id = Await.result((actor ? "hit").mapTo[Int], timeout.duration)
-        replies = replies + (id -> (replies(id) + 1))
+        replies = replies + (id → (replies(id) + 1))
       }
 
       counter.get should ===(connectionCount)
@@ -139,7 +138,7 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
 
       for (_ ← 1 to iterationCount; _ ← 1 to connectionCount) {
         val id = Await.result((actor ? "hit").mapTo[String], timeout.duration)
-        replies = replies + (id -> (replies(id) + 1))
+        replies = replies + (id → (replies(id) + 1))
       }
 
       actor ! akka.routing.Broadcast("end")
@@ -185,7 +184,7 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
 
       for (_ ← 1 to iterationCount; _ ← 1 to connectionCount) {
         val id = Await.result((actor ? "hit").mapTo[String], timeout.duration)
-        replies = replies + (id -> (replies(id) + 1))
+        replies = replies + (id → (replies(id) + 1))
       }
 
       watch(actor)

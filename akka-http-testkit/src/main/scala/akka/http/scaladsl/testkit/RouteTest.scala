@@ -4,7 +4,10 @@
 
 package akka.http.scaladsl.testkit
 
+import akka.http.scaladsl.marshalling.ToResponseMarshallable
+import akka.http.scaladsl.server.directives.ExecutionDirectives._
 import akka.http.scaladsl.settings.RoutingSettings
+import akka.stream.impl.ConstantFun
 import com.typesafe.config.{ ConfigFactory, Config }
 import scala.collection.immutable
 import scala.concurrent.{ ExecutionContext, Await, Future }
@@ -111,11 +114,14 @@ trait RouteTest extends RequestBuilding with WSTestRequestBuilding with RouteTes
    * The result of the pipeline is the result that can later be checked with `check`. See the
    * "separate running route from checking" example from ScalatestRouteTestSpec.scala.
    */
-  def runRoute: RouteTestResult ⇒ RouteTestResult = conforms
+  def runRoute: RouteTestResult ⇒ RouteTestResult = ConstantFun.scalaIdentityFunction
 
   // there is already an implicit class WithTransformation in scope (inherited from akka.http.scaladsl.testkit.TransformerPipelineSupport)
   // however, this one takes precedence
   implicit class WithTransformation2(request: HttpRequest) {
+    /**
+     * Apply request to given routes for further inspection in `check { }` block.
+     */
     def ~>[A, B](f: A ⇒ B)(implicit ta: TildeArrow[A, B]): ta.Out = ta(request, f)
   }
 
@@ -133,12 +139,13 @@ trait RouteTest extends RequestBuilding with WSTestRequestBuilding with RouteTes
       type Out = HttpRequest
       def apply(request: HttpRequest, f: HttpRequest ⇒ HttpRequest) = f(request)
     }
-    implicit def injectIntoRoute(implicit timeout: RouteTestTimeout,
-                                 defaultHostInfo: DefaultHostInfo,
-                                 routingSettings: RoutingSettings,
+    implicit def injectIntoRoute(implicit
+      timeout: RouteTestTimeout,
+                                 defaultHostInfo:  DefaultHostInfo,
+                                 routingSettings:  RoutingSettings,
                                  executionContext: ExecutionContext,
-                                 materializer: Materializer,
-                                 routingLog: RoutingLog,
+                                 materializer:     Materializer,
+                                 routingLog:       RoutingLog,
                                  rejectionHandler: RejectionHandler = RejectionHandler.default,
                                  exceptionHandler: ExceptionHandler = null) =
       new TildeArrow[RequestContext, Future[RouteResult]] {
@@ -152,7 +159,7 @@ trait RouteTest extends RequestBuilding with WSTestRequestBuilding with RouteTes
           val ctx = new RequestContextImpl(effectiveRequest, routingLog.requestLog(effectiveRequest), routingSettings)
           val sealedExceptionHandler = ExceptionHandler.seal(exceptionHandler)
           val semiSealedRoute = // sealed for exceptions but not for rejections
-            Directives.handleExceptions(sealedExceptionHandler) { route }
+            Directives.handleExceptions(sealedExceptionHandler)(route)
           val deferrableRouteResult = semiSealedRoute(ctx)
           deferrableRouteResult.fast.foreach(routeTestResult.handleResult)(executionContext)
           routeTestResult

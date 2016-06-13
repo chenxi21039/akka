@@ -357,7 +357,7 @@ object ByteString {
 
   private[akka] object Companion {
     private val companionMap = Seq(ByteString1, ByteString1C, ByteStrings).
-      map(x ⇒ x.SerializationIdentity -> x).toMap.
+      map(x ⇒ x.SerializationIdentity → x).toMap.
       withDefault(x ⇒ throw new IllegalArgumentException("Invalid serialization id " + x))
 
     def apply(from: Byte): Companion = companionMap(from)
@@ -528,7 +528,7 @@ object CompactByteString {
     else {
       val ar = new Array[Byte](bytes.size)
       bytes.copyToArray(ar)
-      CompactByteString(ar)
+      ByteString.ByteString1C(ar)
     }
   }
 

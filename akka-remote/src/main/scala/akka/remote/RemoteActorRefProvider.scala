@@ -4,6 +4,7 @@
 
 package akka.remote
 
+import akka.Done
 import akka.actor._
 import akka.dispatch.sysmsg._
 import akka.event.{ Logging, LoggingAdapter, EventStream }
@@ -59,8 +60,13 @@ private[akka] object RemoteActorRefProvider {
     }
 
     when(WaitTransportShutdown) {
-      case Event((), _) ⇒
+      case Event(Done, _) ⇒
         log.info("Remoting shut down.")
+        systemGuardian ! TerminationHookDone
+        stop()
+
+      case Event(Status.Failure(ex), _) ⇒
+        log.error(ex, "Remoting shut down with error")
         systemGuardian ! TerminationHookDone
         stop()
     }
@@ -73,9 +79,10 @@ private[akka] object RemoteActorRefProvider {
    * and handled as dead letters to the original (remote) destination. Without this special case, DeathWatch related
    * functionality breaks, like the special handling of Watch messages arriving to dead letters.
    */
-  private class RemoteDeadLetterActorRef(_provider: ActorRefProvider,
-                                         _path: ActorPath,
-                                         _eventStream: EventStream) extends DeadLetterActorRef(_provider, _path, _eventStream) {
+  private class RemoteDeadLetterActorRef(
+    _provider:    ActorRefProvider,
+    _path:        ActorPath,
+    _eventStream: EventStream) extends DeadLetterActorRef(_provider, _path, _eventStream) {
     import EndpointManager.Send
 
     override def !(message: Any)(implicit sender: ActorRef): Unit = message match {
@@ -103,9 +110,9 @@ private[akka] object RemoteActorRefProvider {
  *
  */
 private[akka] class RemoteActorRefProvider(
-  val systemName: String,
-  val settings: ActorSystem.Settings,
-  val eventStream: EventStream,
+  val systemName:    String,
+  val settings:      ActorSystem.Settings,
+  val eventStream:   EventStream,
   val dynamicAccess: DynamicAccess) extends ActorRefProvider {
   import RemoteActorRefProvider._
 
@@ -162,16 +169,16 @@ private[akka] class RemoteActorRefProvider(
 
     val internals = Internals(
       remoteDaemon = {
-        val d = new RemoteSystemDaemon(
-          system,
-          local.rootPath / "remote",
-          rootGuardian,
-          remotingTerminator,
-          log,
-          untrustedMode = remoteSettings.UntrustedMode)
-        local.registerExtraNames(Map(("remote", d)))
-        d
-      },
+      val d = new RemoteSystemDaemon(
+        system,
+        local.rootPath / "remote",
+        rootGuardian,
+        remotingTerminator,
+        log,
+        untrustedMode = remoteSettings.UntrustedMode)
+      local.registerExtraNames(Map(("remote", d)))
+      d
+    },
       serialization = SerializationExtension(system),
       transport = new Remoting(system, this))
 
@@ -257,9 +264,9 @@ private[akka] class RemoteActorRefProvider(
       val lookup =
         if (lookupDeploy)
           elems.head match {
-            case "user"   ⇒ deployer.lookup(elems.drop(1))
-            case "remote" ⇒ lookupRemotes(elems)
-            case _        ⇒ None
+            case "user" | "system" ⇒ deployer.lookup(elems.drop(1))
+            case "remote"          ⇒ lookupRemotes(elems)
+            case _                 ⇒ None
           }
         else None
 
@@ -434,12 +441,12 @@ private[akka] trait RemoteRef extends ActorRefScope {
  * This reference is network-aware (remembers its origin) and immutable.
  */
 private[akka] class RemoteActorRef private[akka] (
-  remote: RemoteTransport,
+  remote:                RemoteTransport,
   val localAddressToUse: Address,
-  val path: ActorPath,
-  val getParent: InternalActorRef,
-  props: Option[Props],
-  deploy: Option[Deploy])
+  val path:              ActorPath,
+  val getParent:         InternalActorRef,
+  props:                 Option[Props],
+  deploy:                Option[Deploy])
   extends InternalActorRef with RemoteRef {
 
   def getChild(name: Iterator[String]): InternalActorRef = {

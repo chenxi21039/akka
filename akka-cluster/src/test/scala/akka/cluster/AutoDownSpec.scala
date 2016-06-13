@@ -22,7 +22,7 @@ object AutoDownSpec {
 
   class AutoDownTestActor(
     autoDownUnreachableAfter: FiniteDuration,
-    probe: ActorRef)
+    probe:                    ActorRef)
     extends AutoDownBase(autoDownUnreachableAfter) {
 
     override def selfAddress = memberA.address
@@ -38,7 +38,6 @@ object AutoDownSpec {
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class AutoDownSpec extends AkkaSpec {
   import AutoDownSpec._
 

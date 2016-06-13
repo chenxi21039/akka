@@ -248,7 +248,7 @@ private[akka] abstract class Mailbox(val messageQueue: MessageQueue)
    * Process the messages in the mailbox
    */
   @tailrec private final def processMailbox(
-    left: Int = java.lang.Math.max(dispatcher.throughput, 1),
+    left:       Int  = java.lang.Math.max(dispatcher.throughput, 1),
     deadlineNs: Long = if (dispatcher.isThroughputDeadlineTimeDefined == true) System.nanoTime + dispatcher.throughputDeadlineTime.toNanos else 0L): Unit =
     if (shouldProcessMessage) {
       val next = dequeue()
@@ -619,8 +619,11 @@ object UnboundedMailbox {
 
 /**
  * SingleConsumerOnlyUnboundedMailbox is a high-performance, multiple producer—single consumer, unbounded MailboxType,
- * the only drawback is that you can't have multiple consumers,
+ * with the drawback that you can't have multiple consumers,
  * which rules out using it with BalancingPool (BalancingDispatcher) for instance.
+ *
+ * Currently this queue is slower for some benchmarks than the ConcurrentLinkedQueue from JDK 8 that is used by default,
+ * so be sure to measure the performance in your particular setting in order to determine which one to use.
  */
 final case class SingleConsumerOnlyUnboundedMailbox() extends MailboxType with ProducesMessageQueue[NodeMessageQueue] {
 
@@ -654,7 +657,8 @@ final case class BoundedMailbox(val capacity: Int, override val pushTimeOut: Fin
   extends MailboxType with ProducesMessageQueue[BoundedMailbox.MessageQueue]
   with ProducesPushTimeoutSemanticsMailbox {
 
-  def this(settings: ActorSystem.Settings, config: Config) = this(config.getInt("mailbox-capacity"),
+  def this(settings: ActorSystem.Settings, config: Config) = this(
+    config.getInt("mailbox-capacity"),
     config.getNanosDuration("mailbox-push-timeout-time"))
 
   if (capacity < 0) throw new IllegalArgumentException("The capacity for BoundedMailbox can not be negative")
@@ -779,7 +783,8 @@ case class BoundedDequeBasedMailbox( final val capacity: Int, override final val
   extends MailboxType with ProducesMessageQueue[BoundedDequeBasedMailbox.MessageQueue]
   with ProducesPushTimeoutSemanticsMailbox {
 
-  def this(settings: ActorSystem.Settings, config: Config) = this(config.getInt("mailbox-capacity"),
+  def this(settings: ActorSystem.Settings, config: Config) = this(
+    config.getInt("mailbox-capacity"),
     config.getNanosDuration("mailbox-push-timeout-time"))
 
   if (capacity < 0) throw new IllegalArgumentException("The capacity for BoundedDequeBasedMailbox can not be negative")
@@ -855,7 +860,8 @@ object UnboundedControlAwareMailbox {
 final case class BoundedControlAwareMailbox(capacity: Int, override final val pushTimeOut: FiniteDuration) extends MailboxType
   with ProducesMessageQueue[BoundedControlAwareMailbox.MessageQueue]
   with ProducesPushTimeoutSemanticsMailbox {
-  def this(settings: ActorSystem.Settings, config: Config) = this(config.getInt("mailbox-capacity"),
+  def this(settings: ActorSystem.Settings, config: Config) = this(
+    config.getInt("mailbox-capacity"),
     config.getNanosDuration("mailbox-push-timeout-time"))
 
   def create(owner: Option[ActorRef], system: Option[ActorSystem]): MessageQueue = new BoundedControlAwareMailbox.MessageQueue(capacity, pushTimeOut)

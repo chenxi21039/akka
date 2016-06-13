@@ -117,10 +117,10 @@ object LoggerSpec {
 
     override def mdc(currentMessage: Any): MDC = {
       reqId += 1
-      val always = Map("requestId" -> reqId)
+      val always = Map("requestId" → reqId)
       val cmim = "Current Message in MDC"
       val perMessage = currentMessage match {
-        case `cmim` ⇒ Map[String, Any]("currentMsg" -> cmim, "currentMsgLength" -> cmim.length)
+        case `cmim` ⇒ Map[String, Any]("currentMsg" → cmim, "currentMsgLength" → cmim.length)
         case _      ⇒ Map()
       }
       always ++ perMessage
@@ -133,7 +133,6 @@ object LoggerSpec {
 
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class LoggerSpec extends WordSpec with Matchers {
 
   import LoggerSpec._

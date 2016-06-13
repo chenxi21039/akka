@@ -10,7 +10,6 @@ import scala.concurrent.duration._
 import akka.testkit.{ LongRunningTest, AkkaSpec }
 import java.util.concurrent.ThreadLocalRandom
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class EWMASpec extends AkkaSpec(MetricsEnabledSpec.config) with MetricsCollectorFactory {
 
   val collector = createMetricsCollector
@@ -94,7 +93,7 @@ class EWMASpec extends AkkaSpec(MetricsEnabledSpec.config) with MetricsCollector
               } else None
           }
         }
-        streamingDataSet ++= changes.map(m ⇒ m.name -> m)
+        streamingDataSet ++= changes.map(m ⇒ m.name → m)
       }
     }
   }

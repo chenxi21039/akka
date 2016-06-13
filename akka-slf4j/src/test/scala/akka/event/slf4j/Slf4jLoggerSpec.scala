@@ -56,7 +56,6 @@ object Slf4jLoggerSpec {
 
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class Slf4jLoggerSpec extends AkkaSpec(Slf4jLoggerSpec.config) with BeforeAndAfterEach {
   import Slf4jLoggerSpec._
 
@@ -97,7 +96,7 @@ class Slf4jLoggerSpec extends AkkaSpec(Slf4jLoggerSpec.config) with BeforeAndAft
     }
 
     "put custom MDC values when specified" in {
-      producer ! StringWithMDC("Message with custom MDC values", Map("ticketNumber" -> 3671, "ticketDesc" -> "Custom MDC Values"))
+      producer ! StringWithMDC("Message with custom MDC values", Map("ticketNumber" → 3671, "ticketDesc" → "Custom MDC Values"))
 
       awaitCond(outputString.contains("----"), 5 seconds)
       val s = outputString
@@ -110,7 +109,7 @@ class Slf4jLoggerSpec extends AkkaSpec(Slf4jLoggerSpec.config) with BeforeAndAft
     }
 
     "Support null values in custom MDC" in {
-      producer ! StringWithMDC("Message with null custom MDC values", Map("ticketNumber" -> 3671, "ticketDesc" -> null))
+      producer ! StringWithMDC("Message with null custom MDC values", Map("ticketNumber" → 3671, "ticketDesc" → null))
 
       awaitCond(outputString.contains("----"), 5 seconds)
       val s = outputString

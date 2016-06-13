@@ -4,13 +4,23 @@
 
 package akka.http.javadsl.model;
 
+import akka.Done;
+import akka.stream.Materializer;
 import akka.util.ByteString;
+import scala.concurrent.Future;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 
 /**
  * The base type for an Http message (request or response).
+ *
+ * INTERNAL API: this trait will be changed in binary-incompatible ways for classes that are derived from it!
+ * Do not implement this interface outside the Akka code base!
+ *
+ * Binary compatibility is only maintained for callers of this trait’s interface.
  */
 public interface HttpMessage {
     /**
@@ -49,6 +59,29 @@ public interface HttpMessage {
      * The entity of this message.
      */
     ResponseEntity entity();
+
+    /**
+     *  Drains entity stream of this message
+     */
+    DiscardedEntity discardEntityBytes(Materializer materializer);
+
+    /**
+     * Represents the the currently being-drained HTTP Entity which triggers completion of the contained
+     * Future once the entity has been drained for the given HttpMessage completely.
+     */
+    public interface DiscardedEntity {
+        /**
+         * This future completes successfully once the underlying entity stream has been
+         * successfully drained (and fails otherwise).
+         */
+        Future<Done> future();
+
+        /**
+         * This future completes successfully once the underlying entity stream has been
+         * successfully drained (and fails otherwise).
+         */
+        CompletionStage<Done> completionStage();
+    }
 
     public static interface MessageTransformations<Self> {
         /**
@@ -103,8 +136,16 @@ public interface HttpMessage {
 
         /**
          * Returns a copy of Self message with a new entity.
+         *
+         * @deprecated Will be removed in Akka 3.x, use {@link #withEntity(ContentType, Path)} instead.
          */
+        @Deprecated
         Self withEntity(ContentType type, File file);
+
+        /**
+         * Returns a copy of Self message with a new entity.
+         */
+        Self withEntity(ContentType type, Path file);
 
         /**
          * Returns a copy of Self message with a new entity.

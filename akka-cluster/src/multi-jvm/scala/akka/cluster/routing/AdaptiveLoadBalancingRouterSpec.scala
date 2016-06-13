@@ -58,7 +58,7 @@ object AdaptiveLoadBalancingRouterMultiJvmSpec extends MultiNodeConfig {
   val third = role("third")
 
   commonConfig(debugConfig(on = false).withFallback(ConfigFactory.parseString("""
-      akka.failure-detector.acceptable-heartbeat-pause = 10s
+      akka.cluster.failure-detector.acceptable-heartbeat-pause = 10s
       akka.cluster.metrics.collect-interval = 1s
       akka.cluster.metrics.gossip-interval = 1s
       akka.cluster.metrics.moving-average-half-life = 2s
@@ -99,11 +99,11 @@ abstract class AdaptiveLoadBalancingRouterSpec extends MultiNodeSpec(AdaptiveLoa
     Await.result(router ? GetRoutees, timeout.duration).asInstanceOf[Routees].routees
 
   def receiveReplies(expectedReplies: Int): Map[Address, Int] = {
-    val zero = Map.empty[Address, Int] ++ roles.map(address(_) -> 0)
+    val zero = Map.empty[Address, Int] ++ roles.map(address(_) → 0)
     (receiveWhile(5 seconds, messages = expectedReplies) {
       case Reply(address) ⇒ address
     }).foldLeft(zero) {
-      case (replyMap, address) ⇒ replyMap + (address -> (replyMap(address) + 1))
+      case (replyMap, address) ⇒ replyMap + (address → (replyMap(address) + 1))
     }
   }
 
@@ -116,10 +116,11 @@ abstract class AdaptiveLoadBalancingRouterSpec extends MultiNodeSpec(AdaptiveLoa
   }
 
   def startRouter(name: String): ActorRef = {
-    val router = system.actorOf(ClusterRouterPool(
-      local = AdaptiveLoadBalancingPool(HeapMetricsSelector),
-      settings = ClusterRouterPoolSettings(totalInstances = 10, maxInstancesPerNode = 1, allowLocalRoutees = true, useRole = None)).
-      props(Props[Echo]),
+    val router = system.actorOf(
+      ClusterRouterPool(
+        local = AdaptiveLoadBalancingPool(HeapMetricsSelector),
+        settings = ClusterRouterPoolSettings(totalInstances = 10, maxInstancesPerNode = 1, allowLocalRoutees = true, useRole = None)).
+        props(Props[Echo]),
       name)
     // it may take some time until router receives cluster member events
     awaitAssert { currentRoutees(router).size should ===(roles.size) }

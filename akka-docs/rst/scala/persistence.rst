@@ -596,7 +596,7 @@ trait to your ``PersistentActor`` on the sending side.  It takes care of re-send
 have not been confirmed within a configurable timeout.
 
 The state of the sending actor, including which messages have been sent that have not been
-confirmed by the recepient must be persistent so that it can survive a crash of the sending actor
+confirmed by the recipient must be persistent so that it can survive a crash of the sending actor
 or JVM. The ``AtLeastOnceDelivery`` trait does not persist anything by itself. It is your
 responsibility to persist the intent that a message is sent and that a confirmation has been
 received.
@@ -796,6 +796,18 @@ Here is how everything is wired together:
 
 .. includecode:: ../../../akka-persistence/src/test/scala/akka/persistence/fsm/PersistentFSMSpec.scala#customer-apply-event
 
+``andThen`` can be used to define actions which will be executed following event's persistence - convenient for "side effects" like sending a message or logging.
+Notice that actions defined in ``andThen`` block are not executed on recovery:
+
+.. includecode:: ../../../akka-persistence/src/test/scala/akka/persistence/fsm/PersistentFSMSpec.scala#customer-andthen-example
+
+A snapshot of state data can be persisted by calling the ``saveStateSnapshot()`` method:
+
+.. includecode:: ../../../akka-persistence/src/test/scala/akka/persistence/fsm/PersistentFSMSpec.scala#customer-snapshot-example
+
+On recovery state data is initialized according to the latest available snapshot, then the remaining domain events are replayed, triggering the
+``applyEvent`` method.
+
 .. _storage-plugins:
 
 Storage plugins
@@ -822,6 +834,9 @@ Applications can provide their own plugins by implementing a plugin API and acti
 Plugin development requires the following imports:
 
 .. includecode:: code/docs/persistence/PersistencePluginDocSpec.scala#plugin-imports
+
+Eager initialization of persistence plugin
+------------------------------------------
 
 By default, persistence plugins are started on-demand, as they are used. In some case, however, it might be beneficial
 to start a certain plugin eagerly. In order to do that, you should first add the ``akka.persistence.Persistence``

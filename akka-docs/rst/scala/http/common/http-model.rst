@@ -77,7 +77,7 @@ as shown here the Akka HTTP model defines a number of subclasses of ``HttpEntity
 stream of bytes.
 
 
-.. _HttpEntity:
+.. _HttpEntity-scala:
 
 HttpEntity
 ----------
@@ -257,7 +257,7 @@ Transfer-Encoding
   response will not be rendered onto the wire and trigger a warning being logged instead!
 
 Content-Length
-  The content length of a message is modelled via its :ref:`HttpEntity`. As such no ``Content-Length`` header will ever
+  The content length of a message is modelled via its :ref:`HttpEntity-scala`. As such no ``Content-Length`` header will ever
   be part of a message's ``header`` sequence.
   Similarly, a ``Content-Length`` header instance that is explicitly added to the ``headers`` of a request or
   response will not be rendered onto the wire and trigger a warning being logged instead!
@@ -282,7 +282,19 @@ Connection
   request's method, protocol and potential ``Connection`` header as well as the response's protocol, entity and
   potential ``Connection`` header. See `this test`__ for a full table of what happens when.
 
+Strict-Transport-Security
+  HTTP Strict Transport Security (HSTS) is a web security policy mechanism which is communicated by the
+  ``Strict-Transport-Security`` header. The most important security vulnerability that HSTS can fix is SSL-stripping
+  man-in-the-middle attacks. The SSL-stripping attact works by transparently converting a secure HTTPS connection into a
+  plain HTTP connection. The user can see that the connection is insecure, but crucially there is no way of knowing
+  whether the connection should be secure. HSTS addresses this problem by informing the browser that connections to the
+  site should always use TLS/SSL. See also `RFC 6797`_.
+
+.. _RFC 6797: http://tools.ietf.org/html/rfc6797
+
 __ @github@/akka-http-core/src/test/scala/akka/http/impl/engine/rendering/ResponseRendererSpec.scala#L422
+
+.. _custom-headers-scala:
 
 Custom Headers
 --------------
@@ -336,3 +348,38 @@ provided to parse (or render to) Strings or byte arrays.
   and can override them if needed. This is useful, since both ``client`` and ``host-connection-pool`` APIs,
   such as the Client API ``Http().outgoingConnection`` or the Host Connection Pool APIs ``Http().singleRequest`` or ``Http().superPool``,
   usually need the same settings, however the ``server`` most likely has a very different set of settings.
+
+.. _registeringCustomMediaTypes:
+
+Registering Custom Media Types
+------------------------------
+
+Akka HTTP `predefines`_ most commonly encountered media types and emits them in their well-typed form while parsing http messages.
+Sometimes you may want to define a custom media type and inform the parser infrastructure about how to handle these custom
+media types, e.g. that ``application/custom`` is to be treated as ``NonBinary`` with ``WithFixedCharset``. To achieve this you
+need to register the custom media type in the server's settings by configuring ``ParserSettings`` like this:
+
+.. includecode:: ../../../../../akka-http-tests/src/test/scala/akka/http/scaladsl/CustomMediaTypesSpec.scala
+   :include: application-custom
+
+You may also want to read about MediaType `Registration trees`_, in order to register your vendor specific media types
+in the right style / place.
+
+.. _Registration trees: https://en.wikipedia.org/wiki/Media_type#Registration_trees
+.. _predefines: https://github.com/akka/akka/blob/master/akka-http-core/src/main/scala/akka/http/scaladsl/model/MediaType.scala#L297
+
+The URI model
+-------------
+
+Akka HTTP offers its own specialised URI model class which is tuned for both performance and idiomatic usage within
+other types of the HTTP model. For example, an HTTPRequest's target URI is parsed into this type, where all character
+escaping and other URI specific semantics are applied.
+
+Obtaining the Raw Request URI
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Sometimes it may be needed to obtain the "raw" value of an incoming URI, without applying any escaping or parsing to it.
+While this use-case is rare, it comes up every once in a while. It is possible to obtain the "raw" request URI in Akka
+HTTP Server side by turning on the ``akka.http.server.raw-request-uri-header`` flag.
+When enabled, a ``Raw-Request-URI`` header will be added to each request. This header will hold the original raw request's
+URI that was used. For an example check the reference configuration.

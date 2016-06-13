@@ -32,6 +32,23 @@ trait SourceQueue[T] {
 }
 
 /**
+ * This trait adds completion support to [[SourceQueue]].
+ */
+trait SourceQueueWithComplete[T] extends SourceQueue[T] {
+  /**
+   * Complete the stream normally. Use `watchCompletion` to be notified of this
+   * operation’s success.
+   */
+  def complete(): Unit
+
+  /**
+   * Complete the stream with a failure. Use `watchCompletion` to be notified of this
+   * operation’s success.
+   */
+  def fail(ex: Throwable): Unit
+}
+
+/**
  * Trait allows to have the queue as a sink for some stream.
  * "SinkQueue" pulls data from stream with backpressure mechanism.
  */
@@ -44,4 +61,14 @@ trait SinkQueue[T] {
    * - completes with `Some(element)` in case next element is available from stream.
    */
   def pull(): Future[Option[T]]
+}
+
+/**
+ * This trait adds cancel support to [[SinkQueue]].
+ */
+trait SinkQueueWithCancel[T] extends SinkQueue[T] {
+  /**
+   * Cancel the stream. This method returns right away without waiting for actual finalizing stream.
+   */
+  def cancel(): Unit
 }

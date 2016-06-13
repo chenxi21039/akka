@@ -110,9 +110,10 @@ object FSM {
    * This extractor is just convenience for matching a (S, S) pair, including a
    * reminder what the new state is.
    */
-  object -> {
+  object `->` {
     def unapply[S](in: (S, S)) = Some(in)
   }
+  val `→` = `->`
 
   /**
    * Log Entry of the [[akka.actor.LoggingFSM]], can be obtained by calling `getLog`.
@@ -319,7 +320,7 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
    * This extractor is just convenience for matching a (S, S) pair, including a
    * reminder what the new state is.
    */
-  val -> = FSM.->
+  val `->` = FSM.`->`
 
   /**
    * This case object is received in case of a state timeout.
@@ -515,17 +516,24 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
    *
    * @see [[#startWith]]
    */
-  final def initialize(): Unit = makeTransition(currentState)
+  final def initialize(): Unit =
+    if (currentState != null) makeTransition(currentState)
+    else throw new IllegalStateException("You must call `startWith` before calling `initialize`")
 
   /**
    * Return current state name (i.e. object of type S)
    */
-  final def stateName: S = currentState.stateName
+  final def stateName: S = {
+    if (currentState != null) currentState.stateName
+    else throw new IllegalStateException("You must call `startWith` before using `stateName`")
+  }
 
   /**
    * Return current state data (i.e. object of type D)
    */
-  final def stateData: D = currentState.stateData
+  final def stateData: D =
+    if (currentState != null) currentState.stateData
+    else throw new IllegalStateException("You must call `startWith` before using `stateData`")
 
   /**
    * Return next state data (available in onTransition handlers)

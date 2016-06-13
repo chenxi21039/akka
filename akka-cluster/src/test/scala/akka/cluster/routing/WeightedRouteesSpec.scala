@@ -11,7 +11,6 @@ import akka.testkit.AkkaSpec
 import akka.routing.ActorSelectionRoutee
 import akka.routing.ActorRefRoutee
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class WeightedRouteesSpec extends AkkaSpec(ConfigFactory.parseString("""
       akka.actor.provider = "akka.cluster.ClusterActorRefProvider"
       akka.remote.netty.tcp.port = 0
@@ -31,7 +30,7 @@ class WeightedRouteesSpec extends AkkaSpec(ConfigFactory.parseString("""
   "WeightedRoutees" must {
 
     "allocate weighted routees" in {
-      val weights = Map(a1 -> 1, b1 -> 3, c1 -> 10)
+      val weights = Map(a1 → 1, b1 → 3, c1 → 10)
       val weighted = new WeightedRoutees(routees, a1, weights)
 
       weighted(1) should ===(routeeA)
@@ -47,7 +46,7 @@ class WeightedRouteesSpec extends AkkaSpec(ConfigFactory.parseString("""
         empty.total
       }
 
-      val empty2 = new WeightedRoutees(Vector(routeeA), a1, Map(a1 -> 0))
+      val empty2 = new WeightedRoutees(Vector(routeeA), a1, Map(a1 → 0))
       empty2.isEmpty should ===(true)
       intercept[IllegalArgumentException] {
         empty2.total
@@ -67,7 +66,7 @@ class WeightedRouteesSpec extends AkkaSpec(ConfigFactory.parseString("""
     }
 
     "allocate routees for undefined weight" in {
-      val weights = Map(a1 -> 1, b1 -> 7)
+      val weights = Map(a1 → 1, b1 → 7)
       val weighted = new WeightedRoutees(routees, a1, weights)
 
       weighted(1) should ===(routeeA)
@@ -78,7 +77,7 @@ class WeightedRouteesSpec extends AkkaSpec(ConfigFactory.parseString("""
     }
 
     "allocate weighted local routees" in {
-      val weights = Map(a1 -> 2, b1 -> 1, c1 -> 10)
+      val weights = Map(a1 → 2, b1 → 1, c1 → 10)
       val routees2 = Vector(testActorRoutee, routeeB, routeeC)
       val weighted = new WeightedRoutees(routees2, a1, weights)
 
@@ -87,7 +86,7 @@ class WeightedRouteesSpec extends AkkaSpec(ConfigFactory.parseString("""
     }
 
     "not allocate ref with weight zero" in {
-      val weights = Map(a1 -> 0, b1 -> 2, c1 -> 10)
+      val weights = Map(a1 → 0, b1 → 2, c1 → 10)
       val weighted = new WeightedRoutees(routees, a1, weights)
 
       1 to weighted.total foreach { weighted(_) should not be (routeeA) }

@@ -32,7 +32,7 @@ Configuring a Host Connection Pool
 
 Apart from the connection-level config settings and socket options there are a number of settings that allow you to
 influence the behavior of the connection pool logic itself.
-Check out the ``akka.http.client.host-connection-pool`` section of the Akka HTTP :ref:`akka-http-configuration` for
+Check out the ``akka.http.host-connection-pool`` section of the Akka HTTP :ref:`akka-http-configuration` for
 more information about which settings are available and what they mean.
 
 Note that, if you request pools with different configurations for the same target host you will get *independent* pools.
@@ -142,6 +142,11 @@ termination has been completed.
 It's also possible to trigger the immediate termination of *all* connection pools in the ``ActorSystem`` at the same
 time by calling ``Http().shutdownAllConnectionPools()``. This call too produces a ``Future[Unit]`` which is fulfilled when
 all pools have terminated.
+
+.. note::
+  When encoutering unexpected ``akka.stream.AbruptTerminationException`` exceptions during ``ActorSystem`` **shutdown**
+  please make sure that active connections are shut down before shutting down the entire system, this can be done by
+  calling the ``Http().shutdownAllConnectionPools()`` method, and only once its Future completes, shutting down the actor system.
 
 
 Example

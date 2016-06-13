@@ -3,7 +3,8 @@
  */
 package akka.stream.impl.io
 
-import java.io.{ File, InputStream }
+import java.io.InputStream
+import java.nio.file.Path
 
 import akka.stream._
 import akka.stream.ActorAttributes.Dispatcher
@@ -17,14 +18,14 @@ import scala.concurrent.{ Future, Promise }
 
 /**
  * INTERNAL API
- * Creates simple synchronous (Java 6 compatible) Source backed by the given file.
+ * Creates simple synchronous Source backed by the given file.
  */
-private[akka] final class FileSource(f: File, chunkSize: Int, val attributes: Attributes, shape: SourceShape[ByteString])
+private[akka] final class FileSource(f: Path, chunkSize: Int, val attributes: Attributes, shape: SourceShape[ByteString])
   extends SourceModule[ByteString, Future[IOResult]](shape) {
   require(chunkSize > 0, "chunkSize must be greater than 0")
   override def create(context: MaterializationContext) = {
     // FIXME rewrite to be based on GraphStage rather than dangerous downcasts
-    val materializer = ActorMaterializer.downcast(context.materializer)
+    val materializer = ActorMaterializerHelper.downcast(context.materializer)
     val settings = materializer.effectiveSettings(context.effectiveAttributes)
 
     val ioResultPromise = Promise[IOResult]()
@@ -41,6 +42,8 @@ private[akka] final class FileSource(f: File, chunkSize: Int, val attributes: At
 
   override def withAttributes(attr: Attributes): Module =
     new FileSource(f, chunkSize, attr, amendShape(attr))
+
+  override protected def label: String = s"FileSource($f, $chunkSize)"
 }
 
 /**
@@ -50,7 +53,7 @@ private[akka] final class FileSource(f: File, chunkSize: Int, val attributes: At
 private[akka] final class InputStreamSource(createInputStream: () ⇒ InputStream, chunkSize: Int, val attributes: Attributes, shape: SourceShape[ByteString])
   extends SourceModule[ByteString, Future[IOResult]](shape) {
   override def create(context: MaterializationContext) = {
-    val materializer = ActorMaterializer.downcast(context.materializer)
+    val materializer = ActorMaterializerHelper.downcast(context.materializer)
     val ioResultPromise = Promise[IOResult]()
 
     val pub = try {

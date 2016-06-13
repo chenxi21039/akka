@@ -23,7 +23,7 @@ class MessageSpec extends FreeSpec with Matchers with WithMaterializerSpec {
   val InvalidUtf8TwoByteSequence: ByteString = ByteString(
     (128 + 64).toByte, // start two byte sequence
     0 // but don't finish it
-    )
+  )
 
   "The WebSocket implementation should" - {
     "collect messages from frames" - {
@@ -741,8 +741,10 @@ class MessageSpec extends FreeSpec with Matchers with WithMaterializerSpec {
               00000000 # empty mask
           """
 
-        pushInput(header)
-        expectProtocolErrorOnNetwork()
+        EventFilter[ProtocolException](occurrences = 1).intercept {
+          pushInput(header)
+          expectProtocolErrorOnNetwork()
+        }
       }
       "control frame bigger than 125 bytes" in new ServerTestSetup {
         pushInput(frameHeader(Opcode.Ping, 126, fin = true, mask = Some(0)))
@@ -973,6 +975,6 @@ class MessageSpec extends FreeSpec with Matchers with WithMaterializerSpec {
 
   val trace = false // set to `true` for debugging purposes
   def printEvent[T](marker: String): Flow[T, T, NotUsed] =
-    if (trace) akka.http.impl.util.printEvent(marker)
+    if (trace) Flow[T].log(marker)
     else Flow[T]
 }

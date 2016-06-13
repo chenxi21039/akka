@@ -10,8 +10,8 @@ import org.scalatest.BeforeAndAfterEach
 import akka.testkit._
 import scala.concurrent.duration._
 
-import akka.actor.{ Props, Actor, ActorRef, ActorSystem, PoisonPill}
-import akka.japi.{ Procedure}
+import akka.actor.{ Props, Actor, ActorRef, ActorSystem, PoisonPill }
+import akka.japi.{ Procedure }
 import com.typesafe.config.{ Config, ConfigFactory }
 
 object EventBusSpec {
@@ -22,7 +22,6 @@ object EventBusSpec {
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 abstract class EventBusSpec(busName: String, conf: Config = ConfigFactory.empty()) extends AkkaSpec(conf) with BeforeAndAfterEach {
   type BusType <: EventBus
 

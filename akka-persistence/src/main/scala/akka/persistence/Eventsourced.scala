@@ -9,10 +9,12 @@ import java.util.UUID
 
 import scala.collection.immutable
 import scala.util.control.NonFatal
-import akka.actor.DeadLetter
-import akka.actor.StashOverflowException
+import akka.actor.{ DeadLetter, ReceiveTimeout, StashOverflowException }
+import akka.util.Helpers.ConfigOps
 import akka.event.Logging
 import akka.event.LoggingAdapter
+
+import scala.concurrent.duration.{ Duration, FiniteDuration }
 
 /**
  * INTERNAL API
@@ -29,6 +31,9 @@ private[persistence] object Eventsourced {
   private final case class StashingHandlerInvocation(evt: Any, handler: Any ⇒ Unit) extends PendingHandlerInvocation
   /** does not force the actor to stash commands; Originates from either `persistAsync` or `defer` calls */
   private final case class AsyncHandlerInvocation(evt: Any, handler: Any ⇒ Unit) extends PendingHandlerInvocation
+
+  /** message used to detect that recovery timed out */
+  private final case class RecoveryTick(snapshot: Boolean)
 }
 
 /**
@@ -145,7 +150,8 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    * @param event the event that was to be persisted
    */
   protected def onPersistRejected(cause: Throwable, event: Any, seqNr: Long): Unit = {
-    log.warning("Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
+    log.warning(
+      "Rejected to persist event type [{}] with sequence number [{}] for persistenceId [{}] due to [{}].",
       event.getClass.getName, seqNr, persistenceId, cause.getMessage)
   }
 
@@ -162,6 +168,9 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
             throw e
         }
     }
+
+  private def unstashInternally(all: Boolean): Unit =
+    if (all) internalStash.unstashAll() else internalStash.unstash()
 
   private def startRecovery(recovery: Recovery): Unit = {
     changeState(recoveryStarted(recovery.replayMax))
@@ -226,7 +235,8 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
       case DeleteSnapshotsFailure(c, e) ⇒
         log.warning("Failed to deleteSnapshots given criteria [{}] due to: [{}: {}]", c, e.getClass.getCanonicalName, e.getMessage)
       case DeleteMessagesFailure(e, toSequenceNr) ⇒
-        log.warning("Failed to deleteMessages toSequenceNr [{}] for persistenceId [{}] due to [{}: {}].",
+        log.warning(
+          "Failed to deleteMessages toSequenceNr [{}] for persistenceId [{}] due to [{}: {}].",
           toSequenceNr, persistenceId, e.getClass.getCanonicalName, e.getMessage)
       case m ⇒ super.unhandled(m)
     }
@@ -341,7 +351,7 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    * Unlike `persist` the persistent actor will continue to receive incoming commands between the
    * call to `persist` and executing it's `handler`. This asynchronous, non-stashing, version of
    * of persist should be used when you favor throughput over the "command-2 only processed after
-   * command-1 effects' have been applied" guarantee, which is provided by the plain [[persist]] method.
+   * command-1 effects' have been applied" guarantee, which is provided by the plain `persist` method.
    *
    * An event `handler` may close over persistent actor state and modify it. The `sender` of a persisted
    * event is the sender of the corresponding command. This means that one can reply to a command
@@ -424,7 +434,10 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
   /**
    * Returns `true` if this persistent actor is currently recovering.
    */
-  def recoveryRunning: Boolean = currentState.recoveryRunning
+  def recoveryRunning: Boolean = {
+    // currentState is null if this is called from constructor
+    if (currentState == null) true else currentState.recoveryRunning
+  }
 
   /**
    * Returns `true` if this persistent actor has successfully finished recovery.
@@ -453,6 +466,13 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    */
   private def recoveryStarted(replayMax: Long) = new State {
 
+    // protect against snapshot stalling forever because of journal overloaded and such
+    val timeout = extension.journalConfigFor(journalPluginId).getMillisDuration("recovery-event-timeout")
+    val timeoutCancellable = {
+      import context.dispatcher
+      context.system.scheduler.scheduleOnce(timeout, self, RecoveryTick(snapshot = true))
+    }
+
     private val recoveryBehavior: Receive = {
       val _receiveRecover = receiveRecover
 
@@ -463,6 +483,7 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
           _receiveRecover(s)
         case RecoveryCompleted if _receiveRecover.isDefinedAt(RecoveryCompleted) ⇒
           _receiveRecover(RecoveryCompleted)
+
       }
     }
 
@@ -471,14 +492,22 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
 
     override def stateReceive(receive: Receive, message: Any) = message match {
       case LoadSnapshotResult(sso, toSnr) ⇒
+        timeoutCancellable.cancel()
         sso.foreach {
           case SelectedSnapshot(metadata, snapshot) ⇒
             setLastSequenceNr(metadata.sequenceNr)
             // Since we are recovering we can ignore the receive behavior from the stack
             Eventsourced.super.aroundReceive(recoveryBehavior, SnapshotOffer(metadata, snapshot))
         }
-        changeState(recovering(recoveryBehavior))
+        changeState(recovering(recoveryBehavior, timeout))
         journal ! ReplayMessages(lastSequenceNr + 1L, toSnr, replayMax, persistenceId, self)
+
+      case RecoveryTick(true) ⇒
+        try onRecoveryFailure(
+          new RecoveryTimedOut(s"Recovery timed out, didn't get snapshot within $timeout s"),
+          event = None)
+        finally context.stop(self)
+
       case other ⇒
         stashInternally(other)
     }
@@ -494,32 +523,56 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    *
    * All incoming messages are stashed.
    */
-  private def recovering(recoveryBehavior: Receive) = new State {
-    override def toString: String = "replay started"
-    override def recoveryRunning: Boolean = true
+  private def recovering(recoveryBehavior: Receive, timeout: FiniteDuration) =
+    new State {
 
-    override def stateReceive(receive: Receive, message: Any) = message match {
-      case ReplayedMessage(p) ⇒
-        try {
-          updateLastSequenceNr(p)
-          Eventsourced.super.aroundReceive(recoveryBehavior, p)
-        } catch {
-          case NonFatal(t) ⇒
-            try onRecoveryFailure(t, Some(p.payload)) finally context.stop(self)
-        }
-      case RecoverySuccess(highestSeqNr) ⇒
-        onReplaySuccess() // callback for subclass implementation
-        changeState(processingCommands)
-        sequenceNr = highestSeqNr
-        setLastSequenceNr(highestSeqNr)
-        internalStash.unstashAll()
-        Eventsourced.super.aroundReceive(recoveryBehavior, RecoveryCompleted)
-      case ReplayMessagesFailure(cause) ⇒
-        try onRecoveryFailure(cause, event = None) finally context.stop(self)
-      case other ⇒
-        stashInternally(other)
+      // protect against snapshot stalling forever because of journal overloaded and such
+      val timeoutCancellable = {
+        import context.dispatcher
+        context.system.scheduler.schedule(timeout, timeout, self, RecoveryTick(snapshot = false))
+      }
+      var eventSeenInInterval = false
+
+      override def toString: String = "replay started"
+
+      override def recoveryRunning: Boolean = true
+
+      override def stateReceive(receive: Receive, message: Any) = message match {
+        case ReplayedMessage(p) ⇒
+          try {
+            eventSeenInInterval = true
+            updateLastSequenceNr(p)
+            Eventsourced.super.aroundReceive(recoveryBehavior, p)
+          } catch {
+            case NonFatal(t) ⇒
+              timeoutCancellable.cancel()
+              try onRecoveryFailure(t, Some(p.payload)) finally context.stop(self)
+          }
+        case RecoverySuccess(highestSeqNr) ⇒
+          timeoutCancellable.cancel()
+          onReplaySuccess() // callback for subclass implementation
+          changeState(processingCommands)
+          sequenceNr = highestSeqNr
+          setLastSequenceNr(highestSeqNr)
+          internalStash.unstashAll()
+          Eventsourced.super.aroundReceive(recoveryBehavior, RecoveryCompleted)
+        case ReplayMessagesFailure(cause) ⇒
+          timeoutCancellable.cancel()
+          try onRecoveryFailure(cause, event = None) finally context.stop(self)
+        case RecoveryTick(false) if !eventSeenInInterval ⇒
+          timeoutCancellable.cancel()
+          try onRecoveryFailure(
+            new RecoveryTimedOut(s"Recovery timed out, didn't get event within $timeout s, highest sequence number seen $sequenceNr"),
+            event = None)
+          finally context.stop(self)
+        case RecoveryTick(false) ⇒
+          eventSeenInInterval = false
+        case RecoveryTick(true) ⇒
+        // snapshot tick, ignore
+        case other ⇒
+          stashInternally(other)
+      }
     }
-  }
 
   private def flushBatch() {
     if (eventBatch.nonEmpty) {
@@ -538,6 +591,8 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    * Common receive handler for processingCommands and persistingEvents
    */
   private abstract class ProcessingState extends State {
+    override def recoveryRunning: Boolean = false
+
     val common: Receive = {
       case WriteMessageSuccess(p, id) ⇒
         // instanceId mismatch can happen for persistAsync and defer in case of actor restart
@@ -580,10 +635,13 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
       case WriteMessagesFailed(_) ⇒
         writeInProgress = false
         () // it will be stopped by the first WriteMessageFailure message
+
+      case _: RecoveryTick =>
+        // we may have one of these in the mailbox before the scheduled timeout
+        // is cancelled when recovery has completed, just consume it so the concrete actor never sees it
     }
 
-    def onWriteMessageComplete(err: Boolean): Unit =
-      pendingInvocations.pop()
+    def onWriteMessageComplete(err: Boolean): Unit
   }
 
   /**
@@ -592,7 +650,6 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    */
   private val processingCommands: State = new ProcessingState {
     override def toString: String = "processing commands"
-    override def recoveryRunning: Boolean = false
 
     override def stateReceive(receive: Receive, message: Any) =
       if (common.isDefinedAt(message)) common(message)
@@ -604,12 +661,13 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
     private def aroundReceiveComplete(err: Boolean): Unit = {
       if (eventBatch.nonEmpty) flushBatch()
 
-      if (pendingStashingPersistInvocations > 0)
-        changeState(persistingEvents)
-      else if (err)
-        internalStash.unstashAll()
-      else
-        internalStash.unstash()
+      if (pendingStashingPersistInvocations > 0) changeState(persistingEvents)
+      else unstashInternally(all = err)
+    }
+
+    override def onWriteMessageComplete(err: Boolean): Unit = {
+      pendingInvocations.pop()
+      unstashInternally(all = err)
     }
   }
 
@@ -620,7 +678,6 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
    */
   private val persistingEvents: State = new ProcessingState {
     override def toString: String = "persisting events"
-    override def recoveryRunning: Boolean = false
 
     override def stateReceive(receive: Receive, message: Any) =
       if (common.isDefinedAt(message)) common(message)
@@ -638,8 +695,7 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
 
       if (pendingStashingPersistInvocations == 0) {
         changeState(processingCommands)
-        if (err) internalStash.unstashAll()
-        else internalStash.unstash()
+        unstashInternally(all = err)
       }
     }
 

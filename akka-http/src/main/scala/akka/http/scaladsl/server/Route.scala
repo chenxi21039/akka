@@ -5,8 +5,8 @@
 package akka.http.scaladsl.server
 
 import akka.NotUsed
-import akka.http.scaladsl.settings.{ RoutingSettings, ParserSettings }
-import akka.stream.{ ActorMaterializer, Materializer }
+import akka.http.scaladsl.settings.{ ParserSettings, RoutingSettings }
+import akka.stream.{ ActorMaterializer, ActorMaterializerHelper, Materializer }
 
 import scala.concurrent.{ ExecutionContextExecutor, Future }
 import akka.stream.scaladsl.Flow
@@ -23,8 +23,9 @@ object Route {
   /**
    * "Seals" a route by wrapping it with exception handling and rejection conversion.
    */
-  def seal(route: Route)(implicit routingSettings: RoutingSettings,
-                         parserSettings: ParserSettings = null,
+  def seal(route: Route)(implicit
+    routingSettings: RoutingSettings,
+                         parserSettings:   ParserSettings   = null,
                          rejectionHandler: RejectionHandler = RejectionHandler.default,
                          exceptionHandler: ExceptionHandler = null): Route = {
     import directives.ExecutionDirectives._
@@ -38,32 +39,34 @@ object Route {
   /**
    * Turns a `Route` into a server flow.
    *
-   * This conversion is also implicitly available through [[RouteResult.route2HandlerFlow]].
+   * This conversion is also implicitly available through [[RouteResult#route2HandlerFlow]].
    */
-  def handlerFlow(route: Route)(implicit routingSettings: RoutingSettings,
-                                parserSettings: ParserSettings,
-                                materializer: Materializer,
-                                routingLog: RoutingLog,
+  def handlerFlow(route: Route)(implicit
+    routingSettings: RoutingSettings,
+                                parserSettings:   ParserSettings,
+                                materializer:     Materializer,
+                                routingLog:       RoutingLog,
                                 executionContext: ExecutionContextExecutor = null,
-                                rejectionHandler: RejectionHandler = RejectionHandler.default,
-                                exceptionHandler: ExceptionHandler = null): Flow[HttpRequest, HttpResponse, NotUsed] =
+                                rejectionHandler: RejectionHandler         = RejectionHandler.default,
+                                exceptionHandler: ExceptionHandler         = null): Flow[HttpRequest, HttpResponse, NotUsed] =
     Flow[HttpRequest].mapAsync(1)(asyncHandler(route))
 
   /**
    * Turns a `Route` into an async handler function.
    */
-  def asyncHandler(route: Route)(implicit routingSettings: RoutingSettings,
-                                 parserSettings: ParserSettings,
-                                 materializer: Materializer,
-                                 routingLog: RoutingLog,
+  def asyncHandler(route: Route)(implicit
+    routingSettings: RoutingSettings,
+                                 parserSettings:   ParserSettings,
+                                 materializer:     Materializer,
+                                 routingLog:       RoutingLog,
                                  executionContext: ExecutionContextExecutor = null,
-                                 rejectionHandler: RejectionHandler = RejectionHandler.default,
-                                 exceptionHandler: ExceptionHandler = null): HttpRequest ⇒ Future[HttpResponse] = {
+                                 rejectionHandler: RejectionHandler         = RejectionHandler.default,
+                                 exceptionHandler: ExceptionHandler         = null): HttpRequest ⇒ Future[HttpResponse] = {
     val effectiveEC = if (executionContext ne null) executionContext else materializer.executionContext
 
     {
       implicit val executionContext = effectiveEC // overrides parameter
-      val effectiveParserSettings = if (parserSettings ne null) parserSettings else ParserSettings(ActorMaterializer.downcast(materializer).system)
+      val effectiveParserSettings = if (parserSettings ne null) parserSettings else ParserSettings(ActorMaterializerHelper.downcast(materializer).system)
 
       val sealedRoute = seal(route)
       request ⇒

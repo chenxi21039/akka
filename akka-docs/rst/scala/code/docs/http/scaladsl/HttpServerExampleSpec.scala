@@ -4,28 +4,22 @@
 
 package docs.http.scaladsl
 
-import akka.actor.{ Props, ActorRef, ActorSystem }
 import akka.event.LoggingAdapter
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.Http.ServerBinding
-import akka.http.scaladsl.model._
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{ Flow, Sink }
 import akka.testkit.TestActors
+import docs.CompileOnlySpec
 import org.scalatest.{ Matchers, WordSpec }
-import scala.io.StdIn
 import scala.language.postfixOps
 
 import scala.concurrent.{ ExecutionContext, Future }
 
-class HttpServerExampleSpec extends WordSpec with Matchers {
+class HttpServerExampleSpec extends WordSpec with Matchers
+  with CompileOnlySpec {
 
   // never actually called
   val log: LoggingAdapter = null
 
-  def compileOnlySpec(body: => Unit) = ()
-
   "binding-example" in compileOnlySpec {
+    import akka.actor.ActorSystem
     import akka.http.scaladsl.Http
     import akka.stream.ActorMaterializer
     import akka.stream.scaladsl._
@@ -44,36 +38,52 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
   }
 
   "binding-failure-high-level-example" in compileOnlySpec {
+    import akka.actor.ActorSystem
     import akka.http.scaladsl.Http
+    import akka.http.scaladsl.Http.ServerBinding
     import akka.http.scaladsl.server.Directives._
     import akka.stream.ActorMaterializer
 
-    implicit val system = ActorSystem()
-    implicit val materializer = ActorMaterializer()
-    // needed for the future onFailure in the end
-    implicit val executionContext = system.dispatcher
+    import scala.concurrent.Future
 
-    val handler = get {
-      complete("Hello world!")
+    object WebServer {
+      def main(args: Array[String]) {
+        implicit val system = ActorSystem()
+        implicit val materializer = ActorMaterializer()
+        // needed for the future onFailure in the end
+        implicit val executionContext = system.dispatcher
+
+        val handler = get {
+          complete("Hello world!")
+        }
+
+        // let's say the OS won't allow us to bind to 80.
+        val (host, port) = ("localhost", 80)
+        val bindingFuture: Future[ServerBinding] =
+          Http().bindAndHandle(handler, host, port)
+
+        bindingFuture.onFailure {
+          case ex: Exception =>
+            log.error(ex, "Failed to bind to {}:{}!", host, port)
+        }
+      }
     }
-
-    // let's say the OS won't allow us to bind to 80.
-    val (host, port) = ("localhost", 80)
-    val bindingFuture: Future[ServerBinding] =
-      Http().bindAndHandle(handler, host, port)
-
-    bindingFuture.onFailure {
-      case ex: Exception =>
-        log.error(ex, "Failed to bind to {}:{}!", host, port)
-    }
-
   }
 
   // mock values:
-  val handleConnections: Sink[Http.IncomingConnection, Future[Http.ServerBinding]] =
+  val handleConnections = {
+    import akka.stream.scaladsl.Sink
     Sink.ignore.mapMaterializedValue(_ => Future.failed(new Exception("")))
+  }
 
   "binding-failure-handling" in compileOnlySpec {
+    import akka.actor.ActorSystem
+    import akka.http.scaladsl.Http
+    import akka.http.scaladsl.Http.ServerBinding
+    import akka.stream.ActorMaterializer
+
+    import scala.concurrent.Future
+
     implicit val system = ActorSystem()
     implicit val materializer = ActorMaterializer()
     // needed for the future onFailure in the end
@@ -98,6 +108,12 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
   }
 
   "incoming-connections-source-failure-handling" in compileOnlySpec {
+    import akka.actor.ActorSystem
+    import akka.actor.ActorRef
+    import akka.http.scaladsl.Http
+    import akka.stream.ActorMaterializer
+    import akka.stream.scaladsl.Flow
+
     implicit val system = ActorSystem()
     implicit val materializer = ActorMaterializer()
     implicit val executionContext = system.dispatcher
@@ -120,6 +136,12 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
   }
 
   "connection-stream-failure-handling" in compileOnlySpec {
+    import akka.actor.ActorSystem
+    import akka.http.scaladsl.Http
+    import akka.http.scaladsl.model._
+    import akka.stream.ActorMaterializer
+    import akka.stream.scaladsl.Flow
+
     implicit val system = ActorSystem()
     implicit val materializer = ActorMaterializer()
     implicit val executionContext = system.dispatcher
@@ -148,6 +170,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
   }
 
   "full-server-example" in compileOnlySpec {
+    import akka.actor.ActorSystem
     import akka.http.scaladsl.Http
     import akka.http.scaladsl.model.HttpMethods._
     import akka.http.scaladsl.model._
@@ -162,7 +185,8 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
 
     val requestHandler: HttpRequest => HttpResponse = {
       case HttpRequest(GET, Uri.Path("/"), _, _, _) =>
-        HttpResponse(entity = HttpEntity(ContentTypes.`text/html(UTF-8)`,
+        HttpResponse(entity = HttpEntity(
+          ContentTypes.`text/html(UTF-8)`,
           "<html><body>Hello world!</body></html>"))
 
       case HttpRequest(GET, Uri.Path("/ping"), _, _, _) =>
@@ -186,6 +210,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
   }
 
   "low-level-server-example" in compileOnlySpec {
+    import akka.actor.ActorSystem
     import akka.http.scaladsl.Http
     import akka.http.scaladsl.model.HttpMethods._
     import akka.http.scaladsl.model._
@@ -202,7 +227,8 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
 
         val requestHandler: HttpRequest => HttpResponse = {
           case HttpRequest(GET, Uri.Path("/"), _, _, _) =>
-            HttpResponse(entity = HttpEntity(ContentTypes.`text/html(UTF-8)`,
+            HttpResponse(entity = HttpEntity(
+              ContentTypes.`text/html(UTF-8)`,
               "<html><body>Hello world!</body></html>"))
 
           case HttpRequest(GET, Uri.Path("/ping"), _, _, _) =>
@@ -220,7 +246,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
         StdIn.readLine() // let it run until user presses return
         bindingFuture
           .flatMap(_.unbind()) // trigger unbinding from the port
-          .onComplete(_ ⇒ system.terminate()) // and shutdown when done
+          .onComplete(_ => system.terminate()) // and shutdown when done
 
       }
     }
@@ -229,7 +255,9 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
   // format: OFF
 
   "high-level-server-example" in compileOnlySpec {
+    import akka.actor.ActorSystem
     import akka.http.scaladsl.Http
+    import akka.http.scaladsl.model.{ContentTypes, HttpEntity}
     import akka.http.scaladsl.server.Directives._
     import akka.stream.ActorMaterializer
     import scala.io.StdIn
@@ -260,13 +288,15 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
         StdIn.readLine() // let it run until user presses return
         bindingFuture
           .flatMap(_.unbind()) // trigger unbinding from the port
-          .onComplete(_ ⇒ system.terminate()) // and shutdown when done
+          .onComplete(_ => system.terminate()) // and shutdown when done
       }
     }
   }
 
   "minimal-routing-example" in compileOnlySpec {
+    import akka.actor.ActorSystem
     import akka.http.scaladsl.Http
+    import akka.http.scaladsl.model._
     import akka.http.scaladsl.server.Directives._
     import akka.stream.ActorMaterializer
     import scala.io.StdIn
@@ -292,23 +322,21 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
         StdIn.readLine() // let it run until user presses return
         bindingFuture
           .flatMap(_.unbind()) // trigger unbinding from the port
-          .onComplete(_ ⇒ system.terminate()) // and shutdown when done
+          .onComplete(_ => system.terminate()) // and shutdown when done
       }
     }
   }
 
   "long-routing-example" in compileOnlySpec {
     //#long-routing-example
-    import akka.actor.ActorRef
+    import akka.actor.{ActorRef, ActorSystem}
     import akka.http.scaladsl.coding.Deflate
     import akka.http.scaladsl.marshalling.ToResponseMarshaller
     import akka.http.scaladsl.model.StatusCodes.MovedPermanently
     import akka.http.scaladsl.server.Directives._
-    // TODO: these explicit imports are only needed in complex cases, like below; Also, not needed on Scala 2.11
-    import akka.http.scaladsl.server.directives.ParameterDirectives.ParamMagnet
-    import akka.http.scaladsl.server.directives.FormFieldDirectives.FieldMagnet
     import akka.http.scaladsl.unmarshalling.FromRequestUnmarshaller
     import akka.pattern.ask
+    import akka.stream.ActorMaterializer
     import akka.util.Timeout
 
     // types used by the API routes
@@ -402,7 +430,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
           getFromResourceDirectory("docs")
         }
       } ~
-      path("oldApi" / Rest) { pathRest =>
+      path("oldApi" / Remaining) { pathRest =>
         redirect("http://oldapi.example.com/" + pathRest, MovedPermanently)
       }
     }
@@ -410,6 +438,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
 
   "stream random numbers" in compileOnlySpec {
     //#stream-random-numbers
+    import akka.actor.ActorSystem
     import akka.stream.scaladsl._
     import akka.util.ByteString
     import akka.http.scaladsl.Http
@@ -451,7 +480,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
         StdIn.readLine() // let it run until user presses return
         bindingFuture
           .flatMap(_.unbind()) // trigger unbinding from the port
-          .onComplete(_ ⇒ system.terminate()) // and shutdown when done
+          .onComplete(_ => system.terminate()) // and shutdown when done
       }
     }
     //#stream-random-numbers
@@ -459,20 +488,22 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
 
 
   object Auction {
+    import akka.actor.Props
     def props: Props = ???
   }
 
   "interact with an actor" in compileOnlySpec {
     //#actor-interaction
-    import scala.concurrent.duration._
-    import akka.util.Timeout
-    import akka.pattern.ask
     import akka.actor.ActorSystem
-    import akka.stream.ActorMaterializer
     import akka.http.scaladsl.Http
+    import akka.http.scaladsl.model.StatusCodes
     import akka.http.scaladsl.server.Directives._
     import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+    import akka.pattern.ask
+    import akka.stream.ActorMaterializer
+    import akka.util.Timeout
     import spray.json.DefaultJsonProtocol._
+    import scala.concurrent.duration._
     import scala.io.StdIn
 
     object WebServer {
@@ -499,7 +530,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
               parameter("bid".as[Int], "user") { (bid, user) =>
                 // place a bid, fire-and-forget
                 auction ! Bid(user, bid)
-                complete(StatusCodes.Accepted, "bid placed")
+                complete((StatusCodes.Accepted, "bid placed"))
               }
             }
             get {
@@ -516,7 +547,7 @@ class HttpServerExampleSpec extends WordSpec with Matchers {
         StdIn.readLine() // let it run until user presses return
         bindingFuture
           .flatMap(_.unbind()) // trigger unbinding from the port
-          .onComplete(_ ⇒ system.terminate()) // and shutdown when done
+          .onComplete(_ => system.terminate()) // and shutdown when done
 
       }
     }

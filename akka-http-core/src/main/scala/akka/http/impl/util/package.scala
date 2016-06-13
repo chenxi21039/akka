@@ -5,6 +5,7 @@
 package akka.http.impl
 
 import akka.NotUsed
+import akka.stream.{ Attributes, Outlet, Inlet, FlowShape }
 
 import language.implicitConversions
 import java.nio.charset.Charset
@@ -42,30 +43,6 @@ package object util {
   private[http] implicit def enhanceByteStringsMat[Mat](byteStrings: Source[ByteString, Mat]): EnhancedByteStringSource[Mat] =
     new EnhancedByteStringSource(byteStrings)
 
-  private[http] def printEvent[T](marker: String): Flow[T, T, NotUsed] =
-    Flow[T].transform(() ⇒ new PushPullStage[T, T] {
-      override def onPush(element: T, ctx: Context[T]): SyncDirective = {
-        println(s"$marker: $element")
-        ctx.push(element)
-      }
-      override def onPull(ctx: Context[T]): SyncDirective = {
-        println(s"$marker: PULL")
-        ctx.pull()
-      }
-      override def onUpstreamFailure(cause: Throwable, ctx: Context[T]): TerminationDirective = {
-        println(s"$marker: Error $cause")
-        super.onUpstreamFailure(cause, ctx)
-      }
-      override def onUpstreamFinish(ctx: Context[T]): TerminationDirective = {
-        println(s"$marker: Complete")
-        super.onUpstreamFinish(ctx)
-      }
-      override def onDownstreamFinish(ctx: Context[T]): TerminationDirective = {
-        println(s"$marker: Cancel")
-        super.onDownstreamFinish(ctx)
-      }
-    })
-
   private[this] var eventStreamLogger: ActorRef = _
   private[http] def installEventStreamLoggerFor(channel: Class[_])(implicit system: ActorSystem): Unit = {
     synchronized {
@@ -88,15 +65,6 @@ package object util {
     }
   }
 
-  private[http] def errorHandling[T](handler: Throwable ⇒ Unit): PushStage[T, T] =
-    new PushStage[T, T] {
-      override def onPush(element: T, ctx: Context[T]): SyncDirective = ctx.push(element)
-      override def onUpstreamFailure(cause: Throwable, ctx: Context[T]): TerminationDirective = {
-        handler(cause)
-        super.onUpstreamFailure(cause, ctx)
-      }
-    }
-
   private[http] def humanReadableByteCount(bytes: Long, si: Boolean): String = {
     val unit = if (si) 1000 else 1024
     if (bytes >= unit) {
@@ -110,8 +78,27 @@ package object util {
 package util {
 
   import akka.http.scaladsl.model.{ ContentType, HttpEntity }
+  import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
   import akka.stream.{ Attributes, Outlet, Inlet, FlowShape }
   import scala.concurrent.duration.FiniteDuration
+
+  /**
+   * Maps error with the provided function if it is defined for an error or, otherwise, passes it on unchanged.
+   */
+  private[http] final case class MapError[T](f: PartialFunction[Throwable, Throwable]) extends SimpleLinearGraphStage[T] {
+    override def createLogic(attr: Attributes) =
+      new GraphStageLogic(shape) with InHandler with OutHandler {
+        override def onPush(): Unit = push(out, grab(in))
+
+        override def onUpstreamFailure(ex: Throwable): Unit =
+          if (f.isDefinedAt(ex)) super.onUpstreamFailure(f(ex))
+          else super.onUpstreamFailure(ex)
+
+        override def onPull(): Unit = pull(in)
+
+        setHandlers(in, out, this)
+      }
+  }
 
   private[http] class ToStrict(timeout: FiniteDuration, contentType: ContentType)
     extends GraphStage[FlowShape[ByteString, HttpEntity.Strict]] {

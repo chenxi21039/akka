@@ -1,5 +1,5 @@
 import akka._
-import com.typesafe.tools.mima.plugin.MimaKeys
+import com.typesafe.sbt.SbtScalariform.ScalariformKeys
 
 AkkaBuild.defaultSettings
 Formatting.docFormatSettings
@@ -14,3 +14,4 @@ scalacOptions += "-language:_"
 sources in doc in Compile := List()
 
 enablePlugins(ScaladocNoVerificationOfDiagrams)
+disablePlugins(MimaPlugin)

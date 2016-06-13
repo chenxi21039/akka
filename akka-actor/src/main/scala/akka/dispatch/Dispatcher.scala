@@ -11,6 +11,7 @@ import akka.dispatch.sysmsg.SystemMessage
 import java.util.concurrent.{ ExecutorService, RejectedExecutionException }
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater
 
 /**
  * The event-based ``Dispatcher`` binds a set of Actors to a thread pool backed up by a
@@ -25,12 +26,12 @@ import scala.concurrent.duration.FiniteDuration
  *                   Larger values (or zero or negative) increase throughput, smaller values increase fairness
  */
 class Dispatcher(
-  _configurator: MessageDispatcherConfigurator,
-  val id: String,
-  val throughput: Int,
-  val throughputDeadlineTime: Duration,
+  _configurator:                  MessageDispatcherConfigurator,
+  val id:                         String,
+  val throughput:                 Int,
+  val throughputDeadlineTime:     Duration,
   executorServiceFactoryProvider: ExecutorServiceFactoryProvider,
-  val shutdownTimeout: FiniteDuration)
+  val shutdownTimeout:            FiniteDuration)
   extends MessageDispatcher(_configurator) {
 
   import configurator.prerequisites._
@@ -88,16 +89,17 @@ class Dispatcher(
     new Mailbox(mailboxType.create(Some(actor.self), Some(actor.system))) with DefaultSystemMessageQueue
   }
 
+  private val esUpdater = AtomicReferenceFieldUpdater.newUpdater(
+    classOf[Dispatcher],
+    classOf[LazyExecutorServiceDelegate],
+    "executorServiceDelegate")
+
   /**
    * INTERNAL API
    */
   protected[akka] def shutdown: Unit = {
     val newDelegate = executorServiceDelegate.copy() // Doesn't matter which one we copy
-    val es = synchronized {
-      val service = executorServiceDelegate
-      executorServiceDelegate = newDelegate // just a quick getAndSet
-      service
-    }
+    val es = esUpdater.getAndSet(this, newDelegate)
     es.shutdown()
   }
 

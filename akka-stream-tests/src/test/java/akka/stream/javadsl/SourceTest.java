@@ -28,6 +28,7 @@ import scala.concurrent.Future;
 import scala.concurrent.duration.Duration;
 import scala.concurrent.duration.FiniteDuration;
 import scala.util.Try;
+import akka.testkit.AkkaJUnitActorSystemResource;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -448,7 +449,6 @@ public class SourceTest extends StreamTest {
 
   @Test
   public void mustWorkFromFuture() throws Exception {
-    final JavaTestKit probe = new JavaTestKit(system);
     final Iterable<String> input = Arrays.asList("A", "B", "C");
     CompletionStage<String> future1 = Source.from(input).runWith(Sink.<String>head(), materializer);
     CompletionStage<String> future2 = Source.fromCompletionStage(future1).runWith(Sink.<String>head(), materializer);
@@ -484,6 +484,21 @@ public class SourceTest extends StreamTest {
     final List<Integer> result = f.toCompletableFuture().get(3, TimeUnit.SECONDS);
     assertEquals(result.size(), 10000);
     for (Integer i: result) assertEquals(i, (Integer) 42);
+  }
+  
+  @Test
+  public void mustBeAbleToUseQueue() throws Exception {
+    final Pair<SourceQueueWithComplete<String>, CompletionStage<List<String>>> x = 
+        Flow.of(String.class).runWith(
+            Source.queue(2, OverflowStrategy.fail()),
+            Sink.seq(), materializer);
+    final SourceQueueWithComplete<String> source = x.first();
+    final CompletionStage<List<String>> result = x.second();
+    source.offer("hello");
+    source.offer("world");
+    source.complete();
+    assertEquals(result.toCompletableFuture().get(3, TimeUnit.SECONDS),
+        Arrays.asList("hello", "world"));
   }
 
   @Test
@@ -540,7 +555,7 @@ public class SourceTest extends StreamTest {
     probe.expectMsgEquals(",");
     probe.expectMsgEquals("3");
     probe.expectMsgEquals("]");
-    future.toCompletableFuture().get(200, TimeUnit.MILLISECONDS);
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
   }
 
   @Test
@@ -560,7 +575,7 @@ public class SourceTest extends StreamTest {
     probe.expectMsgEquals("2");
     probe.expectMsgEquals(",");
     probe.expectMsgEquals("3");
-    future.toCompletableFuture().get(200, TimeUnit.MILLISECONDS);
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
   }
 
   @Test
@@ -577,7 +592,7 @@ public class SourceTest extends StreamTest {
 
     probe.expectMsgEquals(2);
     probe.expectMsgEquals(3);
-    future.toCompletableFuture().get(200, TimeUnit.MILLISECONDS);
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
   }
 
   @Test
@@ -598,7 +613,7 @@ public class SourceTest extends StreamTest {
     FiniteDuration duration = Duration.apply(200, TimeUnit.MILLISECONDS);
 
     probe.expectNoMsg(duration);
-    future.toCompletableFuture().get(200, TimeUnit.MILLISECONDS);
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
   }
 
   @Test
@@ -623,7 +638,7 @@ public class SourceTest extends StreamTest {
     s.sendNext(1);
     probe.expectMsgEquals(0);
 
-    future.toCompletableFuture().get(200, TimeUnit.MILLISECONDS);
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
   }
 
   @Test
@@ -640,7 +655,41 @@ public class SourceTest extends StreamTest {
 
     probe.expectMsgAllOf(0, 1, 2, 3);
 
-    future.toCompletableFuture().get(200, TimeUnit.MILLISECONDS);
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void mustBeAbleToZipN() throws Exception {
+    final JavaTestKit probe = new JavaTestKit(system);
+    final Source<Integer, NotUsed> source1 = Source.from(Arrays.asList(0, 1));
+    final Source<Integer, NotUsed> source2 = Source.from(Arrays.asList(2, 3));
+
+    final List<Source<Integer, ?>> sources = Arrays.asList(source1, source2);
+
+    final Source<List<Integer>, ?> source = Source.zipN(sources);
+
+    final CompletionStage<Done> future = source.runWith(Sink.foreach(elem -> probe.getRef().tell(elem, ActorRef.noSender())), materializer);
+
+    probe.expectMsgAllOf(Arrays.asList(0, 2), Arrays.asList(1, 3));
+
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void mustBeAbleToZipWithN() throws Exception {
+    final JavaTestKit probe = new JavaTestKit(system);
+    final Source<Integer, NotUsed> source1 = Source.from(Arrays.asList(0, 1));
+    final Source<Integer, NotUsed> source2 = Source.from(Arrays.asList(2, 3));
+
+    final List<Source<Integer, ?>> sources = Arrays.asList(source1, source2);
+
+    final Source<Boolean, ?> source = Source.zipWithN(list -> new Boolean(list.contains(0)), sources);
+
+    final CompletionStage<Done> future = source.runWith(Sink.foreach(elem -> probe.getRef().tell(elem, ActorRef.noSender())), materializer);
+
+    probe.expectMsgAllOf(Boolean.TRUE, Boolean.FALSE);
+
+    future.toCompletableFuture().get(3, TimeUnit.SECONDS);
   }
 
   @Test

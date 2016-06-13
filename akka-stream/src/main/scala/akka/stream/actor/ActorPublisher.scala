@@ -45,7 +45,18 @@ object ActorPublisherMessage {
    * more elements.
    * @param n number of requested elements
    */
-  final case class Request(n: Long) extends ActorPublisherMessage with NoSerializationVerificationNeeded
+  final case class Request(n: Long) extends ActorPublisherMessage with NoSerializationVerificationNeeded {
+    private var processed = false
+    /**
+     * INTERNAL API: needed for stash support
+     */
+    private[akka] def markProcessed(): Unit = processed = true
+
+    /**
+     * INTERNAL API: needed for stash support
+     */
+    private[akka] def isProcessed(): Boolean = processed
+  }
 
   /**
    * This message is delivered to the [[ActorPublisher]] actor when the stream subscriber cancels the
@@ -111,7 +122,6 @@ object ActorPublisherMessage {
  * failure, completed or canceled.
  */
 trait ActorPublisher[T] extends Actor {
-  import akka.stream.actor.ActorPublisherMessage._
   import ActorPublisher.Internal._
   import ActorPublisherMessage._
   import ReactiveStreamsCompliance._
@@ -173,7 +183,7 @@ trait ActorPublisher[T] extends Actor {
    * otherwise `onNext` will throw `IllegalStateException`.
    */
   def onNext(element: T): Unit = lifecycleState match {
-    case Active | PreSubscriber | CompleteThenStop ⇒
+    case Active | PreSubscriber ⇒
       if (demand > 0) {
         demand -= 1
         tryOnNext(subscriber, element)
@@ -182,7 +192,7 @@ trait ActorPublisher[T] extends Actor {
           "onNext is not allowed when the stream has not requested elements, totalDemand was 0")
     case _: ErrorEmitted ⇒
       throw new IllegalStateException("onNext must not be called after onError")
-    case Completed ⇒
+    case Completed | CompleteThenStop ⇒
       throw new IllegalStateException("onNext must not be called after onComplete")
     case Canceled ⇒ // drop
   }
@@ -192,11 +202,11 @@ trait ActorPublisher[T] extends Actor {
    * call [[#onNext]], [[#onError]] and [[#onComplete]].
    */
   def onComplete(): Unit = lifecycleState match {
-    case Active | PreSubscriber | CompleteThenStop ⇒
+    case Active | PreSubscriber ⇒
       lifecycleState = Completed
       if (subscriber ne null) // otherwise onComplete will be called when the subscription arrives
         try tryOnComplete(subscriber) finally subscriber = null
-    case Completed ⇒
+    case Completed | CompleteThenStop ⇒
       throw new IllegalStateException("onComplete must only be called once")
     case _: ErrorEmitted ⇒
       throw new IllegalStateException("onComplete must not be called after onError")
@@ -225,13 +235,13 @@ trait ActorPublisher[T] extends Actor {
    * call [[#onNext]], [[#onError]] and [[#onComplete]].
    */
   def onError(cause: Throwable): Unit = lifecycleState match {
-    case Active | PreSubscriber | CompleteThenStop ⇒
+    case Active | PreSubscriber ⇒
       lifecycleState = ErrorEmitted(cause, stop = false)
       if (subscriber ne null) // otherwise onError will be called when the subscription arrives
         try tryOnError(subscriber, cause) finally subscriber = null
     case _: ErrorEmitted ⇒
       throw new IllegalStateException("onError must only be called once")
-    case Completed ⇒
+    case Completed | CompleteThenStop ⇒
       throw new IllegalStateException("onError must not be called after onComplete")
     case Canceled ⇒ // drop
   }
@@ -256,17 +266,21 @@ trait ActorPublisher[T] extends Actor {
    * INTERNAL API
    */
   protected[akka] override def aroundReceive(receive: Receive, msg: Any): Unit = msg match {
-    case Request(n) ⇒
-      if (n < 1) {
-        if (lifecycleState == Active)
-          onError(numberOfElementsInRequestMustBePositiveException)
-        else
-          super.aroundReceive(receive, msg)
+    case req @ Request(n) ⇒
+      if (req.isProcessed()) {
+        // it's an unstashed Request, demand is already handled
+        super.aroundReceive(receive, req)
       } else {
-        demand += n
-        if (demand < 0)
-          demand = Long.MaxValue // Long overflow, Reactive Streams Spec 3:17: effectively unbounded
-        super.aroundReceive(receive, msg)
+        if (n < 1) {
+          if (lifecycleState == Active)
+            onError(numberOfElementsInRequestMustBePositiveException)
+        } else {
+          demand += n
+          if (demand < 0)
+            demand = Long.MaxValue // Long overflow, Reactive Streams Spec 3:17: effectively unbounded
+          req.markProcessed()
+          super.aroundReceive(receive, req)
+        }
       }
 
     case Subscribe(sub: Subscriber[_]) ⇒
@@ -288,15 +302,18 @@ trait ActorPublisher[T] extends Actor {
           tryOnSubscribe(sub, CancelledSubscription)
           tryOnComplete(sub)
         case Active | Canceled ⇒
-          tryOnSubscribe(sub, CancelledSubscription)
-          tryOnError(sub,
-            if (subscriber == sub) ReactiveStreamsCompliance.canNotSubscribeTheSameSubscriberMultipleTimesException
-            else ReactiveStreamsCompliance.canNotSubscribeTheSameSubscriberMultipleTimesException)
+          if (subscriber eq sub)
+            rejectDuplicateSubscriber(sub)
+          else
+            rejectAdditionalSubscriber(sub, "ActorPublisher")
       }
 
     case Cancel ⇒
-      cancelSelf()
-      super.aroundReceive(receive, msg)
+      if (lifecycleState != Canceled) {
+        // possible to receive again in case of stash
+        cancelSelf()
+        super.aroundReceive(receive, msg)
+      }
 
     case SubscriptionTimeoutExceeded ⇒
       if (!scheduledSubscriptionTimeout.isCancelled) {
@@ -394,7 +411,7 @@ private[akka] object ActorPublisherState extends ExtensionId[ActorPublisherState
 
   override def get(system: ActorSystem): ActorPublisherState = super.get(system)
 
-  override def lookup = ActorPublisherState
+  override def lookup() = ActorPublisherState
 
   override def createExtension(system: ExtendedActorSystem): ActorPublisherState =
     new ActorPublisherState

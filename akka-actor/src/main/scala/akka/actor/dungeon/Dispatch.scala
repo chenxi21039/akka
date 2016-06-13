@@ -16,6 +16,7 @@ import scala.util.control.Exception.Catcher
 import akka.dispatch.MailboxType
 import akka.dispatch.ProducesMessageQueue
 import akka.serialization.SerializerWithStringManifest
+import akka.dispatch.UnboundedMailbox
 
 private[akka] trait Dispatch { this: ActorCell ⇒
 
@@ -61,7 +62,8 @@ private[akka] trait Dispatch { this: ActorCell ⇒
         if (req isInstance mbox.messageQueue) Create(None)
         else {
           val gotType = if (mbox.messageQueue == null) "null" else mbox.messageQueue.getClass.getName
-          Create(Some(ActorInitializationException(self,
+          Create(Some(ActorInitializationException(
+            self,
             s"Actor [$self] requires mailbox type [$req] got [$gotType]")))
         }
       case _ ⇒ Create(None)
@@ -77,6 +79,16 @@ private[akka] trait Dispatch { this: ActorCell ⇒
       // ➡➡➡ NEVER SEND THE SAME SYSTEM MESSAGE OBJECT TO TWO ACTORS ⬅⬅⬅
       parent.sendSystemMessage(akka.dispatch.sysmsg.Supervise(self, async = false))
     }
+    this
+  }
+
+  final def initWithFailure(failure: Throwable): this.type = {
+    val mbox = dispatcher.createMailbox(this, new UnboundedMailbox)
+    swapMailbox(mbox)
+    mailbox.setActor(this)
+    // ➡➡➡ NEVER SEND THE SAME SYSTEM MESSAGE OBJECT TO TWO ACTORS ⬅⬅⬅
+    val createMessage = Create(Some(ActorInitializationException(self, "failure while creating ActorCell", failure)))
+    mailbox.systemEnqueue(self, createMessage)
     this
   }
 

@@ -5,11 +5,15 @@
 package akka.http.scaladsl.server
 
 import akka.http.scaladsl.marshallers.xml.ScalaXmlSupport
+import akka.http.scaladsl.model.{ StatusCodes, HttpResponse }
 import akka.http.scaladsl.server.directives.Credentials
 import com.typesafe.config.{ ConfigFactory, Config }
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream._
+import akka.stream.scaladsl._
 import akka.http.scaladsl.Http
+import scala.concurrent.duration._
+import scala.io.StdIn
 
 object TestServer extends App {
   val testConf: Config = ConfigFactory.parseString("""
@@ -31,7 +35,12 @@ object TestServer extends App {
   val bindingFuture = Http().bindAndHandle({
     get {
       path("") {
-        complete(index)
+        withRequestTimeout(1.milli, _ ⇒ HttpResponse(
+          StatusCodes.EnhanceYourCalm,
+          entity = "Unable to serve response within time limit, please enchance your calm.")) {
+          Thread.sleep(1000)
+          complete(index)
+        }
       } ~
         path("secure") {
           authenticateBasicPF("My very secure site", auth) { user ⇒
@@ -48,7 +57,7 @@ object TestServer extends App {
   }, interface = "localhost", port = 8080)
 
   println(s"Server online at http://localhost:8080/\nPress RETURN to stop...")
-  Console.readLine()
+  StdIn.readLine()
 
   bindingFuture.flatMap(_.unbind()).onComplete(_ ⇒ system.terminate())
 

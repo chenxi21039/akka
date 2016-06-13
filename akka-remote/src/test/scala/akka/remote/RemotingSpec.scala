@@ -125,7 +125,6 @@ object RemotingSpec {
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with DefaultTimeout {
 
   import RemotingSpec._
@@ -141,9 +140,9 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
 
   for (
     (name, proto) ← Seq(
-      "/gonk" -> "tcp",
-      "/zagzag" -> "udp",
-      "/roghtaar" -> "ssl.tcp")
+      "/gonk" → "tcp",
+      "/zagzag" → "udp",
+      "/roghtaar" → "ssl.tcp")
   ) deploy(system, Deploy(name, scope = RemoteScope(addr(remoteSystem, proto))))
 
   def addr(sys: ActorSystem, proto: String) =

@@ -11,7 +11,8 @@ import akka.japi.function.{ Effect, Procedure }
 import akka.stream._
 import akka.stream.impl.StreamLayout.Module
 import akka.stream.impl.fusing.{ GraphInterpreter, GraphStageModule, SubSource, SubSink }
-import akka.stream.impl.{ ReactiveStreamsCompliance}
+import akka.stream.impl.ReactiveStreamsCompliance
+import scala.collection.mutable.ArrayBuffer
 import scala.collection.{ immutable, mutable }
 import scala.concurrent.duration.FiniteDuration
 import akka.stream.actor.ActorSubscriberMessage
@@ -122,9 +123,10 @@ object GraphStageLogic {
   /**
    * Minimal actor to work with other actors and watch them in a synchronous ways
    */
-  final class StageActor(materializer: ActorMaterializer,
-                         getAsyncCallback: StageActorRef.Receive ⇒ AsyncCallback[(ActorRef, Any)],
-                         initialReceive: StageActorRef.Receive) {
+  final class StageActor(
+    materializer:     ActorMaterializer,
+    getAsyncCallback: StageActorRef.Receive ⇒ AsyncCallback[(ActorRef, Any)],
+    initialReceive:   StageActorRef.Receive) {
 
     private val callback = getAsyncCallback(internalReceive)
     private def cell = materializer.supervisor match {
@@ -898,7 +900,7 @@ abstract class GraphStageLogic private[stream] (val inCount: Int, val outCount: 
   final protected def getStageActor(receive: ((ActorRef, Any)) ⇒ Unit): StageActor = {
     _stageActor match {
       case null ⇒
-        val actorMaterializer = ActorMaterializer.downcast(interpreter.materializer)
+        val actorMaterializer = ActorMaterializerHelper.downcast(interpreter.materializer)
         _stageActor = new StageActor(actorMaterializer, getAsyncCallback, receive)
         _stageActor
       case existing ⇒
@@ -1148,9 +1150,9 @@ abstract class TimerGraphStageLogic(_shape: Shape) extends GraphStageLogic(_shap
    * adding the new timer.
    */
   final protected def schedulePeriodicallyWithInitialDelay(
-    timerKey: Any,
+    timerKey:     Any,
     initialDelay: FiniteDuration,
-    interval: FiniteDuration): Unit = {
+    interval:     FiniteDuration): Unit = {
     cancelTimer(timerKey)
     val id = timerIdGen.next()
     val task = interpreter.materializer.schedulePeriodically(initialDelay, interval, new Runnable {

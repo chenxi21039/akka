@@ -4,10 +4,13 @@
 package akka.persistence
 
 import java.lang.{ Iterable ⇒ JIterable }
+
 import akka.actor._
 import akka.japi.Procedure
 import akka.japi.Util
 import com.typesafe.config.Config
+
+import scala.util.control.NoStackTrace
 
 abstract class RecoveryCompleted
 /**
@@ -52,8 +55,8 @@ final case class DeleteMessagesFailure(cause: Throwable, toSequenceNr: Long)
 @SerialVersionUID(1L)
 final case class Recovery(
   fromSnapshot: SnapshotSelectionCriteria = SnapshotSelectionCriteria.Latest,
-  toSequenceNr: Long = Long.MaxValue,
-  replayMax: Long = Long.MaxValue)
+  toSequenceNr: Long                      = Long.MaxValue,
+  replayMax:    Long                      = Long.MaxValue)
 
 object Recovery {
 
@@ -98,6 +101,8 @@ object Recovery {
   val none: Recovery = Recovery(toSequenceNr = 0L)
 }
 
+final class RecoveryTimedOut(message: String) extends RuntimeException(message) with NoStackTrace
+
 /**
  * This defines how to handle the current received message which failed to stash, when the size of
  * Stash exceeding the capacity of Stash.
@@ -105,7 +110,7 @@ object Recovery {
 sealed trait StashOverflowStrategy
 
 /**
- * Discard the message to [[DeadLetter]].
+ * Discard the message to [[akka.actor.DeadLetter]].
  */
 case object DiscardToDeadLetterStrategy extends StashOverflowStrategy {
   /**
@@ -115,7 +120,7 @@ case object DiscardToDeadLetterStrategy extends StashOverflowStrategy {
 }
 
 /**
- * Throw [[StashOverflowException]], hence the persistent actor will starting recovery
+ * Throw [[akka.actor.StashOverflowException]], hence the persistent actor will starting recovery
  * if guarded by default supervisor strategy.
  * Be carefully if used together with persist/persistAll or has many messages needed
  * to replay.
@@ -222,7 +227,7 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    * Unlike `persist` the persistent actor will continue to receive incoming commands between the
    * call to `persist` and executing it's `handler`. This asynchronous, non-stashing, version of
    * of persist should be used when you favor throughput over the "command-2 only processed after
-   * command-1 effects' have been applied" guarantee, which is provided by the plain [[persist]] method.
+   * command-1 effects' have been applied" guarantee, which is provided by the plain [[#persist]] method.
    *
    * An event `handler` may close over persistent actor state and modify it. The `sender` of a persisted
    * event is the sender of the corresponding command. This means that one can reply to a command

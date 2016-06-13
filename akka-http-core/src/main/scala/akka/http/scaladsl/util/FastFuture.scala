@@ -12,8 +12,8 @@ import scala.concurrent.duration.Duration
 import scala.concurrent._
 
 /**
- * Provides alternative implementations of the basic transformation operations defined on [[Future]],
- * which try to avoid scheduling to an [[ExecutionContext]] if possible, i.e. if the given future
+ * Provides alternative implementations of the basic transformation operations defined on [[scala.concurrent.Future]],
+ * which try to avoid scheduling to an [[scala.concurrent.ExecutionContext]] if possible, i.e. if the given future
  * value is already present.
  */
 class FastFuture[A](val future: Future[A]) extends AnyVal {
@@ -80,9 +80,9 @@ object FastFuture {
     def isCompleted = true
     def result(atMost: Duration)(implicit permit: CanAwait) = a
     def ready(atMost: Duration)(implicit permit: CanAwait) = this
-    def transform[S](f: scala.util.Try[A] => scala.util.Try[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
+    def transform[S](f: scala.util.Try[A] ⇒ scala.util.Try[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
       FastFuture(f(Success(a)))
-    def transformWith[S](f: scala.util.Try[A] => scala.concurrent.Future[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
+    def transformWith[S](f: scala.util.Try[A] ⇒ scala.concurrent.Future[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
       new FastFuture(this).transformWith(f)
   }
   private case class ErrorFuture(error: Throwable) extends Future[Nothing] {
@@ -91,9 +91,9 @@ object FastFuture {
     def isCompleted = true
     def result(atMost: Duration)(implicit permit: CanAwait) = throw error
     def ready(atMost: Duration)(implicit permit: CanAwait) = this
-    def transform[S](f: scala.util.Try[Nothing] => scala.util.Try[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
+    def transform[S](f: scala.util.Try[Nothing] ⇒ scala.util.Try[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
       FastFuture(f(Failure(error)))
-    def transformWith[S](f: scala.util.Try[Nothing] => scala.concurrent.Future[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
+    def transformWith[S](f: scala.util.Try[Nothing] ⇒ scala.concurrent.Future[S])(implicit executor: scala.concurrent.ExecutionContext): scala.concurrent.Future[S] =
       new FastFuture(this).transformWith(f)
   }
 

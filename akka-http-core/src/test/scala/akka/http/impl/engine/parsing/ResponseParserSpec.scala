@@ -59,7 +59,8 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
       }
 
       "a response with a simple body" in new Test {
-        collectBlocking(rawParse(GET,
+        collectBlocking(rawParse(
+          GET,
           prep {
             """HTTP/1.1 200 Ok
               |Content-Length: 4
@@ -93,7 +94,8 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
           |Transfer-Encoding: foo, chunked, bar
           |Content-Length: 0
           |
-          |""" should parseTo(HttpResponse(ServerOnTheMove, List(`Transfer-Encoding`(TransferEncodings.Extension("foo"),
+          |""" should parseTo(HttpResponse(ServerOnTheMove, List(`Transfer-Encoding`(
+          TransferEncodings.Extension("foo"),
           TransferEncodings.chunked, TransferEncodings.Extension("bar")))))
         closeAfterResponseCompletion shouldEqual Seq(false)
       }
@@ -158,8 +160,9 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
       }
 
       "message chunk with and without extension" in new Test {
-        Seq(start +
-          """3
+        Seq(
+          start +
+            """3
             |abc
             |10;some=stuff;bla
             |0123456789ABCDEF
@@ -182,7 +185,8 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
       }
 
       "message end" in new Test {
-        Seq(start,
+        Seq(
+          start,
           """0
             |
             |""") should generalMultiParseTo(
@@ -191,14 +195,16 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
       }
 
       "message end with extension, trailer and remaining content" in new Test {
-        Seq(start,
+        Seq(
+          start,
           """000;nice=true
             |Foo: pip
             | apo
             |Bar: xyz
             |
             |HT""") should generalMultiParseTo(
-            Right(baseResponse.withEntity(Chunked(`application/pdf`,
+            Right(baseResponse.withEntity(Chunked(
+              `application/pdf`,
               source(LastChunk("nice=true", List(RawHeader("Foo", "pip apo"), RawHeader("Bar", "xyz"))))))),
             Left(MessageStartError(400: StatusCode, ErrorInfo("Illegal HTTP message start"))))
         closeAfterResponseCompletion shouldEqual Seq(false)
@@ -210,7 +216,8 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
           |Cont""", """ent-Type: application/pdf
           |
           |""") should generalMultiParseTo(
-          Right(HttpResponse(headers = List(`Transfer-Encoding`(TransferEncodings.Extension("fancy"))),
+          Right(HttpResponse(
+            headers = List(`Transfer-Encoding`(TransferEncodings.Extension("fancy"))),
             entity = HttpEntity.Chunked(`application/pdf`, source()))),
           Left(EntityStreamError(ErrorInfo("Entity stream truncation"))))
         closeAfterResponseCompletion shouldEqual Seq(false)
@@ -243,14 +250,16 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
   override def afterAll() = system.terminate()
 
   private class Test {
+    def awaitAtMost: FiniteDuration = 3.seconds
     var closeAfterResponseCompletion = Seq.empty[Boolean]
 
     class StrictEqualHttpResponse(val resp: HttpResponse) {
       override def equals(other: scala.Any): Boolean = other match {
         case other: StrictEqualHttpResponse ⇒
+
           this.resp.copy(entity = HttpEntity.Empty) == other.resp.copy(entity = HttpEntity.Empty) &&
-            Await.result(this.resp.entity.toStrict(250.millis), 250.millis) ==
-            Await.result(other.resp.entity.toStrict(250.millis), 250.millis)
+            Await.result(this.resp.entity.toStrict(awaitAtMost), awaitAtMost) ==
+            Await.result(other.resp.entity.toStrict(awaitAtMost), awaitAtMost)
       }
 
       override def toString = resp.toString
@@ -293,7 +302,7 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
     def rawParse(requestMethod: HttpMethod, input: String*): Source[Either[ResponseOutput, HttpResponse], NotUsed] =
       Source(input.toList)
         .map(bytes ⇒ SessionBytes(TLSPlacebo.dummySession, ByteString(bytes)))
-        .transform(() ⇒ newParserStage(requestMethod)).named("parser")
+        .via(newParserStage(requestMethod)).named("parser")
         .splitWhen(x ⇒ x.isInstanceOf[MessageStart] || x.isInstanceOf[EntityStreamError])
         .prefixAndTail(1)
         .collect {
@@ -312,14 +321,14 @@ class ResponseParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
 
     def newParserStage(requestMethod: HttpMethod = GET) = {
       val parser = new HttpResponseParser(parserSettings, HttpHeaderParser(parserSettings)())
-      parser.setRequestMethodForNextResponse(requestMethod)
+      parser.setContextForNextResponse(HttpResponseParser.ResponseContext(requestMethod, None))
       parser.stage
     }
 
     private def compactEntity(entity: ResponseEntity): Future[ResponseEntity] =
       entity match {
         case x: HttpEntity.Chunked ⇒ compactEntityChunks(x.chunks).fast.map(compacted ⇒ x.copy(chunks = compacted))
-        case _                     ⇒ entity.toStrict(250.millis)
+        case _                     ⇒ entity.toStrict(awaitAtMost)
       }
 
     private def compactEntityChunks(data: Source[ChunkStreamPart, Any]): Future[Source[ChunkStreamPart, Any]] =

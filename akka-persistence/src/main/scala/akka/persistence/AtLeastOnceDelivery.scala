@@ -207,7 +207,7 @@ trait AtLeastOnceDeliveryLike extends Eventsourced {
    * later if no matching `confirmDelivery` was performed.
    *
    * This method will throw [[AtLeastOnceDelivery.MaxUnconfirmedMessagesExceededException]]
-   * if [[numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
+   * if [[#numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
    */
   def deliver(destination: ActorPath)(deliveryIdToMessage: Long ⇒ Any): Unit = {
     if (unconfirmed.size >= maxUnconfirmedMessages)
@@ -242,7 +242,7 @@ trait AtLeastOnceDeliveryLike extends Eventsourced {
    * later if no matching `confirmDelivery` was performed.
    *
    * This method will throw [[AtLeastOnceDelivery.MaxUnconfirmedMessagesExceededException]]
-   * if [[numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
+   * if [[#numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
    */
   def deliver(destination: ActorSelection)(deliveryIdToMessage: Long ⇒ Any): Unit = {
     val isWildcardSelection = destination.pathString.contains("*")
@@ -308,7 +308,8 @@ trait AtLeastOnceDeliveryLike extends Eventsourced {
    * as a blob in your custom snapshot.
    */
   def getDeliverySnapshot: AtLeastOnceDeliverySnapshot =
-    AtLeastOnceDeliverySnapshot(deliverySequenceNr,
+    AtLeastOnceDeliverySnapshot(
+      deliverySequenceNr,
       unconfirmed.map { case (deliveryId, d) ⇒ UnconfirmedDelivery(deliveryId, d.destination, d.message) }(breakOut))
 
   /**
@@ -319,7 +320,7 @@ trait AtLeastOnceDeliveryLike extends Eventsourced {
     deliverySequenceNr = snapshot.currentDeliveryId
     val now = System.nanoTime()
     unconfirmed = snapshot.unconfirmedDeliveries.map(d ⇒
-      d.deliveryId -> Delivery(d.destination, d.message, now, 0))(breakOut)
+      d.deliveryId → Delivery(d.destination, d.message, now, 0))(breakOut)
   }
 
   /**
@@ -384,7 +385,7 @@ abstract class UntypedPersistentActorWithAtLeastOnceDelivery extends UntypedPers
    * later if no matching `confirmDelivery` was performed.
    *
    * This method will throw [[AtLeastOnceDelivery.MaxUnconfirmedMessagesExceededException]]
-   * if [[numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
+   * if [[#numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
    */
   def deliver(destination: ActorPath, deliveryIdToMessage: akka.japi.Function[java.lang.Long, Object]): Unit =
     super.deliver(destination)(id ⇒ deliveryIdToMessage.apply(id))
@@ -407,7 +408,7 @@ abstract class UntypedPersistentActorWithAtLeastOnceDelivery extends UntypedPers
    * later if no matching `confirmDelivery` was performed.
    *
    * This method will throw [[AtLeastOnceDelivery.MaxUnconfirmedMessagesExceededException]]
-   * if [[numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
+   * if [[#numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
    */
   def deliver(destination: ActorSelection, deliveryIdToMessage: akka.japi.Function[java.lang.Long, Object]): Unit =
     super.deliver(destination)(id ⇒ deliveryIdToMessage.apply(id))
@@ -442,7 +443,7 @@ abstract class AbstractPersistentActorWithAtLeastOnceDelivery extends AbstractPe
    * later if no matching `confirmDelivery` was performed.
    *
    * This method will throw [[AtLeastOnceDelivery.MaxUnconfirmedMessagesExceededException]]
-   * if [[numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
+   * if [[#numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
    */
   def deliver(destination: ActorPath, deliveryIdToMessage: akka.japi.Function[java.lang.Long, Object]): Unit =
     super.deliver(destination)(id ⇒ deliveryIdToMessage.apply(id))
@@ -465,7 +466,7 @@ abstract class AbstractPersistentActorWithAtLeastOnceDelivery extends AbstractPe
    * later if no matching `confirmDelivery` was performed.
    *
    * This method will throw [[AtLeastOnceDelivery.MaxUnconfirmedMessagesExceededException]]
-   * if [[numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
+   * if [[#numberOfUnconfirmed]] is greater than or equal to [[#maxUnconfirmedMessages]].
    */
   def deliver(destination: ActorSelection, deliveryIdToMessage: akka.japi.Function[java.lang.Long, Object]): Unit =
     super.deliver(destination)(id ⇒ deliveryIdToMessage.apply(id))

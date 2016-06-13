@@ -25,7 +25,7 @@ class GraphUnzipSpec extends AkkaSpec {
 
       RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
         val unzip = b.add(Unzip[Int, String]())
-        Source(List(1 -> "a", 2 -> "b", 3 -> "c")) ~> unzip.in
+        Source(List(1 → "a", 2 → "b", 3 → "c")) ~> unzip.in
         unzip.out1 ~> Flow[String].buffer(16, OverflowStrategy.backpressure) ~> Sink.fromSubscriber(c2)
         unzip.out0 ~> Flow[Int].buffer(16, OverflowStrategy.backpressure).map(_ * 2) ~> Sink.fromSubscriber(c1)
         ClosedShape
@@ -55,7 +55,7 @@ class GraphUnzipSpec extends AkkaSpec {
 
       RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
         val unzip = b.add(Unzip[Int, String]())
-        Source(List(1 -> "a", 2 -> "b", 3 -> "c")) ~> unzip.in
+        Source(List(1 → "a", 2 → "b", 3 → "c")) ~> unzip.in
         unzip.out0 ~> Sink.fromSubscriber(c1)
         unzip.out1 ~> Sink.fromSubscriber(c2)
         ClosedShape
@@ -77,7 +77,7 @@ class GraphUnzipSpec extends AkkaSpec {
 
       RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
         val unzip = b.add(Unzip[Int, String]())
-        Source(List(1 -> "a", 2 -> "b", 3 -> "c")) ~> unzip.in
+        Source(List(1 → "a", 2 → "b", 3 → "c")) ~> unzip.in
         unzip.out0 ~> Sink.fromSubscriber(c1)
         unzip.out1 ~> Sink.fromSubscriber(c2)
         ClosedShape
@@ -85,6 +85,52 @@ class GraphUnzipSpec extends AkkaSpec {
 
       val sub1 = c1.expectSubscription()
       val sub2 = c2.expectSubscription()
+      sub2.cancel()
+      sub1.request(3)
+      c1.expectNext(1)
+      c1.expectNext(2)
+      c1.expectNext(3)
+      c1.expectComplete()
+    }
+
+    "not push twice when pull is followed by cancel before element has been pushed" in {
+      val c1 = TestSubscriber.manualProbe[Int]()
+      val c2 = TestSubscriber.manualProbe[String]()
+
+      RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
+        val unzip = b.add(Unzip[Int, String]())
+        Source(List(1 → "a", 2 → "b", 3 → "c")) ~> unzip.in
+        unzip.out0 ~> Sink.fromSubscriber(c1)
+        unzip.out1 ~> Sink.fromSubscriber(c2)
+        ClosedShape
+      }).run()
+
+      val sub1 = c1.expectSubscription()
+      val sub2 = c2.expectSubscription()
+      sub2.request(3)
+      sub1.request(3)
+      sub2.cancel()
+      c1.expectNext(1)
+      c1.expectNext(2)
+      c1.expectNext(3)
+      c1.expectComplete()
+    }
+
+    "not loose elements when pull is followed by cancel before other sink has requested" in {
+      val c1 = TestSubscriber.manualProbe[Int]()
+      val c2 = TestSubscriber.manualProbe[String]()
+
+      RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
+        val unzip = b.add(Unzip[Int, String]())
+        Source(List(1 → "a", 2 → "b", 3 → "c")) ~> unzip.in
+        unzip.out0 ~> Sink.fromSubscriber(c1)
+        unzip.out1 ~> Sink.fromSubscriber(c2)
+        ClosedShape
+      }).run()
+
+      val sub1 = c1.expectSubscription()
+      val sub2 = c2.expectSubscription()
+      sub2.request(3)
       sub2.cancel()
       sub1.request(3)
       c1.expectNext(1)
@@ -112,10 +158,10 @@ class GraphUnzipSpec extends AkkaSpec {
       sub1.request(3)
       sub2.request(3)
       p1.expectRequest(p1Sub, 16)
-      p1Sub.sendNext(1 -> "a")
+      p1Sub.sendNext(1 → "a")
       c1.expectNext(1)
       c2.expectNext("a")
-      p1Sub.sendNext(2 -> "b")
+      p1Sub.sendNext(2 → "b")
       c1.expectNext(2)
       c2.expectNext("b")
       sub1.cancel()
@@ -128,7 +174,7 @@ class GraphUnzipSpec extends AkkaSpec {
       RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
         val zip = b.add(Zip[Int, String]())
         val unzip = b.add(Unzip[Int, String]())
-        Source(List(1 -> "a", 2 -> "b", 3 -> "c")) ~> unzip.in
+        Source(List(1 → "a", 2 → "b", 3 → "c")) ~> unzip.in
         unzip.out0 ~> zip.in0
         unzip.out1 ~> zip.in1
         zip.out ~> Sink.fromSubscriber(c1)
@@ -137,9 +183,9 @@ class GraphUnzipSpec extends AkkaSpec {
 
       val sub1 = c1.expectSubscription()
       sub1.request(5)
-      c1.expectNext(1 -> "a")
-      c1.expectNext(2 -> "b")
-      c1.expectNext(3 -> "c")
+      c1.expectNext(1 → "a")
+      c1.expectNext(2 → "b")
+      c1.expectNext(3 → "c")
       c1.expectComplete()
     }
 

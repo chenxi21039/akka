@@ -1,4 +1,4 @@
-.. _http-scala-common:
+.. _http-scala-common-scala:
 
 Common Abstractions (Client- and Server-Side)
 =============================================
@@ -19,3 +19,4 @@ which are specific to one side only.
    de-coding
    json-support
    xml-support
+   timeouts

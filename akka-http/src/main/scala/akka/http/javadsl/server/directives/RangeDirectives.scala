@@ -5,9 +5,8 @@
 package akka.http.javadsl.server
 package directives
 
-import akka.http.impl.server.RouteStructure.RangeSupport
-
-import scala.annotation.varargs
+import java.util.function.Supplier
+import akka.http.scaladsl.server.{ Directives ⇒ D }
 
 abstract class RangeDirectives extends PathDirectives {
   /**
@@ -22,7 +21,9 @@ abstract class RangeDirectives extends PathDirectives {
    * it on the *inside* of the `conditional(...)` directive, i.e. `conditional(...)` must be
    * on a higher level in your route structure in order to function correctly.
    *
-   * @see https://tools.ietf.org/html/rfc7233
+   * For more information, see: https://tools.ietf.org/html/rfc7233
    */
-  @varargs def withRangeSupport(innerRoute: Route, moreInnerRoutes: Route*): Route = RangeSupport()(innerRoute, moreInnerRoutes.toList)
+  def withRangeSupport(inner: Supplier[Route]): Route = RouteAdapter {
+    D.withRangeSupport { inner.get.delegate }
+  }
 }

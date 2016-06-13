@@ -38,7 +38,7 @@ final class MediaTypeNegotiator(requestHeaders: Seq[HttpHeader]) {
     }
 
   /**
-   * Determines whether the given [[MediaType]] is accepted by the client.
+   * Determines whether the given [[akka.http.scaladsl.model.MediaType]] is accepted by the client.
    */
   def isAccepted(mediaType: MediaType): Boolean = qValueFor(mediaType) > 0f
 }
@@ -139,11 +139,11 @@ object ContentNegotiator {
         case x: model.MediaType.WithOpenCharset  ⇒ MediaType(x)
       }
 
-    case class ContentType(contentType: model.ContentType) extends Alternative {
+    final case class ContentType(contentType: model.ContentType) extends Alternative {
       def mediaType = contentType.mediaType
       def format = contentType.toString
     }
-    case class MediaType(mediaType: model.MediaType.WithOpenCharset) extends Alternative {
+    final case class MediaType(mediaType: model.MediaType.WithOpenCharset) extends Alternative {
       def format = mediaType.toString
     }
   }

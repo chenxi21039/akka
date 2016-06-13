@@ -3,10 +3,10 @@
  */
 package akka.stream.scaladsl
 
+import akka.stream.impl.Stages.DefaultAttributes
 import akka.{ Done, NotUsed }
 import akka.actor.{ ActorRef, Cancellable, Props }
 import akka.stream.actor.ActorPublisher
-import akka.stream.impl.Stages.{ DefaultAttributes, StageModule }
 import akka.stream.impl.StreamLayout.Module
 import akka.stream.impl.fusing.GraphStages
 import akka.stream.impl.fusing.GraphStages._
@@ -37,6 +37,8 @@ final class Source[+Out, +Mat](private[stream] override val module: Module)
   override type ClosedMat[+M] = RunnableGraph[M]
 
   override val shape: SourceShape[Out] = module.shape.asInstanceOf[SourceShape[Out]]
+
+  override def toString: String = s"Source($shape, $module)"
 
   override def via[T, Mat2](flow: Graph[FlowShape[Out, T], Mat2]): Repr[T] = viaMat(flow)(Keep.left)
 
@@ -69,17 +71,8 @@ final class Source[+Out, +Mat](private[stream] override val module: Module)
   /**
    * Transform only the materialized value of this Source, leaving all other properties as they were.
    */
-  def mapMaterializedValue[Mat2](f: Mat ⇒ Mat2): ReprMat[Out, Mat2] =
+  override def mapMaterializedValue[Mat2](f: Mat ⇒ Mat2): ReprMat[Out, Mat2] =
     new Source[Out, Mat2](module.transformMaterializedValue(f.asInstanceOf[Any ⇒ Any]))
-
-  /** INTERNAL API */
-  override private[scaladsl] def deprecatedAndThen[U](op: StageModule): Repr[U] = {
-    // No need to copy here, op is a fresh instance
-    new Source(
-      module
-        .fuse(op, shape.out, op.inPort)
-        .replaceShape(SourceShape(op.outPort)))
-  }
 
   /**
    * Connect this `Source` to a `Sink` and run it. The returned value is the materialized value
@@ -105,6 +98,11 @@ final class Source[+Out, +Mat](private[stream] override val module: Module)
    * The returned [[scala.concurrent.Future]] will be completed with value of the final
    * function evaluation when the input stream ends, or completed with `Failure`
    * if there is a failure signaled in the stream.
+   *
+   * If the stream is empty (i.e. completes before signalling any elements),
+   * the reduce stage will fail its downstream with a [[NoSuchElementException]],
+   * which is semantically in-line with that Scala's standard library collections
+   * do in such situations.
    */
   def runReduce[U >: Out](f: (U, U) ⇒ U)(implicit materializer: Materializer): Future[U] =
     runWith(Sink.reduce(f))
@@ -200,6 +198,17 @@ object Source {
       override def iterator: Iterator[T] = f()
       override def toString: String = "() => Iterator"
     })
+
+  /**
+   * Create [[Source]] that will continually produce given elements in specified order.
+   *
+   * Start a new 'cycled' `Source` from the given elements. The producer stream of elements
+   * will continue infinitely by repeating the sequence of elements provided by function parameter.
+   */
+  def cycle[T](f: () ⇒ Iterator[T]): Source[T, NotUsed] = {
+    val iterator = Iterator.continually { val i = f(); if (i.isEmpty) throw new IllegalArgumentException("empty iterator") else i }.flatten
+    fromIterator(() ⇒ iterator).withAttributes(DefaultAttributes.cycledSource)
+  }
 
   /**
    * A graph with the shape of a source logically is a source, this method makes
@@ -362,21 +371,23 @@ object Source {
    * The strategy [[akka.stream.OverflowStrategy.backpressure]] is not supported, and an
    * IllegalArgument("Backpressure overflowStrategy not supported") will be thrown if it is passed as argument.
    *
-   * The buffer can be disabled by using `bufferSize` of 0 and then received messages are dropped
-   * if there is no demand from downstream. When `bufferSize` is 0 the `overflowStrategy` does
-   * not matter.
+   * The buffer can be disabled by using `bufferSize` of 0 and then received messages are dropped if there is no demand
+   * from downstream. When `bufferSize` is 0 the `overflowStrategy` does not matter. An async boundary is added after
+   * this Source; as such, it is never safe to assume the downstream will always generate demand.
    *
-   * The stream can be completed successfully by sending the actor reference an [[akka.actor.Status.Success]]
-   * message in which case already buffered elements will be signaled before signaling completion,
-   * or by sending a [[akka.actor.PoisonPill]] in which case completion will be signaled immediately.
+   * The stream can be completed successfully by sending the actor reference a [[akka.actor.Status.Success]]
+   * (whose content will be ignored) in which case already buffered elements will be signaled before signaling
+   * completion, or by sending [[akka.actor.PoisonPill]] in which case completion will be signaled immediately.
    *
-   * The stream can be completed with failure by sending [[akka.actor.Status.Failure]] to the
+   * The stream can be completed with failure by sending a [[akka.actor.Status.Failure]] to the
    * actor reference. In case the Actor is still draining its internal buffer (after having received
-   * an [[akka.actor.Status.Success]]) before signaling completion and it receives a [[akka.actor.Status.Failure]],
+   * a [[akka.actor.Status.Success]]) before signaling completion and it receives a [[akka.actor.Status.Failure]],
    * the failure will be signaled downstream immediately (instead of the completion signal).
    *
    * The actor will be stopped when the stream is completed, failed or canceled from downstream,
    * i.e. you can watch it to get notified when that happens.
+   *
+   * See also [[akka.stream.javadsl.Source.queue]].
    *
    * @param bufferSize The size of the buffer in element count
    * @param overflowStrategy Strategy that is used when incoming elements cannot fit inside the buffer
@@ -407,6 +418,24 @@ object Source {
     })
 
   /**
+   * Combine the elements of multiple streams into a stream of sequences.
+   */
+  def zipN[T](sources: immutable.Seq[Source[T, _]]): Source[immutable.Seq[T], NotUsed] = zipWithN(ConstantFun.scalaIdentityFunction[immutable.Seq[T]])(sources).addAttributes(DefaultAttributes.zipN)
+
+  /*
+   * Combine the elements of multiple streams into a stream of sequences using a combiner function.
+   */
+  def zipWithN[T, O](zipper: immutable.Seq[T] ⇒ O)(sources: immutable.Seq[Source[T, _]]): Source[O, NotUsed] = {
+    val source = sources match {
+      case immutable.Seq()       ⇒ empty[O]
+      case immutable.Seq(source) ⇒ source.map(t ⇒ zipper(immutable.Seq(t))).mapMaterializedValue(_ ⇒ NotUsed)
+      case s1 +: s2 +: ss        ⇒ combine(s1, s2, ss: _*)(ZipWithN(zipper))
+    }
+
+    source.addAttributes(DefaultAttributes.zipWithN)
+  }
+
+  /**
    * Creates a `Source` that is materialized as an [[akka.stream.SourceQueue]].
    * You can push elements to the queue and they will be emitted to the stream if there is demand from downstream,
    * otherwise they will be buffered until request for demand is received. Elements in the buffer will be discarded
@@ -435,7 +464,56 @@ object Source {
    * @param bufferSize size of buffer in element count
    * @param overflowStrategy Strategy that is used when incoming elements cannot fit inside the buffer
    */
-  def queue[T](bufferSize: Int, overflowStrategy: OverflowStrategy): Source[T, SourceQueue[T]] =
+  def queue[T](bufferSize: Int, overflowStrategy: OverflowStrategy): Source[T, SourceQueueWithComplete[T]] =
     Source.fromGraph(new QueueSource(bufferSize, overflowStrategy).withAttributes(DefaultAttributes.queueSource))
 
+  /**
+   * Start a new `Source` from some resource which can be opened, read and closed.
+   * Interaction with resource happens in a blocking way.
+   *
+   * Example:
+   * {{{
+   * Source.unfoldResource(
+   *   () => new BufferedReader(new FileReader("...")),
+   *   reader => Option(reader.readLine()),
+   *   reader => reader.close())
+   * }}}
+   *
+   * You can use the supervision strategy to handle exceptions for `read` function. All exceptions thrown by `create`
+   * or `close` will fail the stream.
+   *
+   * `Restart` supervision strategy will close and create blocking IO again. Default strategy is `Stop` which means
+   * that stream will be terminated on error in `read` function by default.
+   *
+   * You can configure the default dispatcher for this Source by changing the `akka.stream.blocking-io-dispatcher` or
+   * set it for a given Source by using [[ActorAttributes]].
+   *
+   * @param create - function that is called on stream start and creates/opens resource.
+   * @param read - function that reads data from opened resource. It is called each time backpressure signal
+   *             is received. Stream calls close and completes when `read` returns None.
+   * @param close - function that closes resource
+   */
+  def unfoldResource[T, S](create: () ⇒ S, read: (S) ⇒ Option[T], close: (S) ⇒ Unit): Source[T, NotUsed] =
+    Source.fromGraph(new UnfoldResourceSource(create, read, close))
+
+  /**
+   * Start a new `Source` from some resource which can be opened, read and closed.
+   * It's similar to `unfoldResource` but takes functions that return `Futures` instead of plain values.
+   *
+   * You can use the supervision strategy to handle exceptions for `read` function or failures of produced `Futures`.
+   * All exceptions thrown by `create` or `close` as well as fails of returned futures will fail the stream.
+   *
+   * `Restart` supervision strategy will close and create resource. Default strategy is `Stop` which means
+   * that stream will be terminated on error in `read` function (or future) by default.
+   *
+   * You can configure the default dispatcher for this Source by changing the `akka.stream.blocking-io-dispatcher` or
+   * set it for a given Source by using [[ActorAttributes]].
+   *
+   * @param create - function that is called on stream start and creates/opens resource.
+   * @param read - function that reads data from opened resource. It is called each time backpressure signal
+   *             is received. Stream calls close and completes when `Future` from read function returns None.
+   * @param close - function that closes resource
+   */
+  def unfoldResourceAsync[T, S](create: () ⇒ Future[S], read: (S) ⇒ Future[Option[T]], close: (S) ⇒ Future[Done]): Source[T, NotUsed] =
+    Source.fromGraph(new UnfoldResourceSourceAsync(create, read, close))
 }

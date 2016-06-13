@@ -272,9 +272,9 @@ class GraphStageDocSpec extends AkkaSpec {
 
   "Demonstrate an asynchronous side channel" in {
     import system.dispatcher
-
     //#async-side-channel
-    // will close upstream when the future completes
+    // will close upstream in all materializations of the graph stage instance
+    // when the future completes
     class KillSwitch[A](switch: Future[Unit]) extends GraphStage[FlowShape[A, A]] {
 
       val in = Inlet[A]("KillSwitch.in")
@@ -517,6 +517,34 @@ class GraphStageDocSpec extends AkkaSpec {
     publisher.sendNext(2)
 
     sub.cancel()
+  }
+
+  "Demonstrate stream extension" when {
+
+    "targeting a Source" in {
+      //#extending-source
+      implicit class SourceDuplicator[Out, Mat](s: Source[Out, Mat]) {
+        def duplicateElements: Source[Out, Mat] = s.via(new Duplicator)
+      }
+
+      val s = Source(1 to 3).duplicateElements
+
+      s.runWith(Sink.seq).futureValue should ===(Seq(1, 1, 2, 2, 3, 3))
+      //#extending-source
+    }
+
+    "targeting a Flow" in {
+      //#extending-flow
+      implicit class FlowDuplicator[In, Out, Mat](s: Flow[In, Out, Mat]) {
+        def duplicateElements: Flow[In, Out, Mat] = s.via(new Duplicator)
+      }
+
+      val f = Flow[Int].duplicateElements
+
+      Source(1 to 3).via(f).runWith(Sink.seq).futureValue should ===(Seq(1, 1, 2, 2, 3, 3))
+      //#extending-flow
+    }
+
   }
 
 }

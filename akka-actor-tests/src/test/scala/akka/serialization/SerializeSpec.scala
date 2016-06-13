@@ -128,7 +128,6 @@ object SerializationTests {
     NoMessage.getClass)
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class SerializeSpec extends AkkaSpec(SerializationTests.serializeConf) {
   import SerializationTests._
 
@@ -253,7 +252,6 @@ class SerializeSpec extends AkkaSpec(SerializationTests.serializeConf) {
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class VerifySerializabilitySpec extends AkkaSpec(SerializationTests.verifySerializabilityConf) {
   import SerializationTests._
   implicit val timeout = Timeout(5 seconds)
@@ -287,7 +285,6 @@ class VerifySerializabilitySpec extends AkkaSpec(SerializationTests.verifySerial
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class ReferenceSerializationSpec extends AkkaSpec(SerializationTests.mostlyReferenceSystem) {
   import SerializationTests._
 
@@ -316,7 +313,6 @@ class ReferenceSerializationSpec extends AkkaSpec(SerializationTests.mostlyRefer
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class SerializationCompatibilitySpec extends AkkaSpec(SerializationTests.mostlyReferenceSystem) {
 
   val ser = SerializationExtension(system)
@@ -327,7 +323,8 @@ class SerializationCompatibilitySpec extends AkkaSpec(SerializationTests.mostlyR
 
     "be preserved for the Create SystemMessage" in {
       // Using null as the cause to avoid a large serialized message and JDK differences
-      verify(Create(Some(null)),
+      verify(
+        Create(Some(null)),
         if (scala.util.Properties.versionNumberString.startsWith("2.10.")) {
           "aced00057372001b616b6b612e64697370617463682e7379736d73672e4372656174650000000000" +
             "0000010200014c00076661696c75726574000e4c7363616c612f4f7074696f6e3b78707372000a73" +
@@ -341,53 +338,62 @@ class SerializationCompatibilitySpec extends AkkaSpec(SerializationTests.mostlyR
         })
     }
     "be preserved for the Recreate SystemMessage" in {
-      verify(Recreate(null),
+      verify(
+        Recreate(null),
         "aced00057372001d616b6b612e64697370617463682e7379736d73672e5265637265617465000000" +
           "00000000010200014c000563617573657400154c6a6176612f6c616e672f5468726f7761626c653b" +
           "787070")
     }
     "be preserved for the Suspend SystemMessage" in {
-      verify(Suspend(),
+      verify(
+        Suspend(),
         "aced00057372001c616b6b612e64697370617463682e7379736d73672e53757370656e6400000000" +
           "000000010200007870")
     }
     "be preserved for the Resume SystemMessage" in {
-      verify(Resume(null),
+      verify(
+        Resume(null),
         "aced00057372001b616b6b612e64697370617463682e7379736d73672e526573756d650000000000" +
           "0000010200014c000f63617573656442794661696c7572657400154c6a6176612f6c616e672f5468" +
           "726f7761626c653b787070")
     }
     "be preserved for the Terminate SystemMessage" in {
-      verify(Terminate(),
+      verify(
+        Terminate(),
         "aced00057372001e616b6b612e64697370617463682e7379736d73672e5465726d696e6174650000" +
           "0000000000010200007870")
     }
     "be preserved for the Supervise SystemMessage" in {
-      verify(Supervise(null, true),
+      verify(
+        Supervise(null, true),
         "aced00057372001e616b6b612e64697370617463682e7379736d73672e5375706572766973650000" +
           "0000000000010200025a00056173796e634c00056368696c647400154c616b6b612f6163746f722f" +
           "4163746f725265663b78700170")
     }
     "be preserved for the Watch SystemMessage" in {
-      verify(Watch(null, null),
+      verify(
+        Watch(null, null),
         "aced00057372001a616b6b612e64697370617463682e7379736d73672e5761746368000000000000" +
           "00010200024c00077761746368656574001d4c616b6b612f6163746f722f496e7465726e616c4163" +
           "746f725265663b4c00077761746368657271007e000178707070")
     }
     "be preserved for the Unwatch SystemMessage" in {
-      verify(Unwatch(null, null),
+      verify(
+        Unwatch(null, null),
         "aced00057372001c616b6b612e64697370617463682e7379736d73672e556e776174636800000000" +
           "000000010200024c0007776174636865657400154c616b6b612f6163746f722f4163746f72526566" +
           "3b4c00077761746368657271007e000178707070")
     }
     "be preserved for the NoMessage SystemMessage" in {
-      verify(NoMessage,
+      verify(
+        NoMessage,
         "aced00057372001f616b6b612e64697370617463682e7379736d73672e4e6f4d6573736167652400" +
           "000000000000010200007870")
     }
     "be preserved for the Failed SystemMessage" in {
       // Using null as the cause to avoid a large serialized message and JDK differences
-      verify(Failed(null, cause = null, uid = 0),
+      verify(
+        Failed(null, cause = null, uid = 0),
         "aced00057372001b616b6b612e64697370617463682e7379736d73672e4661696c65640000000000" +
           "0000010200034900037569644c000563617573657400154c6a6176612f6c616e672f5468726f7761" +
           "626c653b4c00056368696c647400154c616b6b612f6163746f722f4163746f725265663b78700000" +
@@ -396,7 +402,6 @@ class SerializationCompatibilitySpec extends AkkaSpec(SerializationTests.mostlyR
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class OverriddenSystemMessageSerializationSpec extends AkkaSpec(SerializationTests.systemMessageMultiSerializerConf) {
   import SerializationTests._
 
@@ -415,17 +420,23 @@ class OverriddenSystemMessageSerializationSpec extends AkkaSpec(SerializationTes
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class DefaultSerializationWarningSpec extends AkkaSpec(
   ConfigFactory.parseString("akka.actor.warn-about-java-serializer-usage = on")) {
 
   val ser = SerializationExtension(system)
+  val messagePrefix = "Using the default Java serializer for class.*"
 
   "Using the default Java serializer" must {
 
-    "log a warning" in {
-      EventFilter.warning(message = "Using the default Java serializer for class.*") intercept {
-        ser.serializerFor(classOf[java.lang.Integer])
+    "log a warning when serializing classes outside of java.lang package" in {
+      EventFilter.warning(message = messagePrefix) intercept {
+        ser.serializerFor(classOf[java.math.BigDecimal])
+      }
+    }
+
+    "not log warning when serializing classes from java.lang package" in {
+      EventFilter.warning(message = messagePrefix, occurrences = 0) intercept {
+        ser.serializerFor(classOf[java.lang.String])
       }
     }
 

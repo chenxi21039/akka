@@ -7,7 +7,6 @@ package akka.http.impl.engine.client
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import org.scalatest.Inside
-import org.scalatest.concurrent.ScalaFutures
 import akka.http.scaladsl.settings.ClientConnectionSettings
 import akka.util.ByteString
 import akka.event.NoLogging
@@ -111,8 +110,70 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
 
         requestsSub.sendComplete()
         netOut.expectComplete()
-        netInSub.sendComplete()
         responses.expectComplete()
+      }
+
+      "has a response with a chunked entity and Connection: close" in new TestSetup {
+        sendStandardRequest()
+
+        sendWireData(
+          """HTTP/1.1 200 OK
+            |Transfer-Encoding: chunked
+            |Connection: close
+            |
+            |""")
+        sendWireData("3\nABC\n")
+        sendWireData("4\nDEFX\n")
+        sendWireData("0\n\n")
+
+        val HttpResponse(_, _, HttpEntity.Chunked(ct, chunks), _) = expectResponse()
+        ct shouldEqual ContentTypes.`application/octet-stream`
+
+        val probe = TestSubscriber.manualProbe[ChunkStreamPart]()
+        chunks.runWith(Sink.fromSubscriber(probe))
+        val sub = probe.expectSubscription()
+        sub.request(4)
+        probe.expectNext(HttpEntity.Chunk("ABC"))
+        probe.expectNext(HttpEntity.Chunk("DEFX"))
+        probe.expectNext(HttpEntity.LastChunk)
+        probe.expectComplete()
+
+        // explicit `requestsSub.sendComplete()` not needed
+        netOut.expectComplete()
+        responses.expectComplete()
+      }
+
+      "has a request with a chunked entity and Connection: close" in new TestSetup {
+        requestsSub.sendNext(HttpRequest(
+          entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, Source(List("ABC", "DEFX").map(ByteString(_)))),
+          headers = List(Connection("close"))
+        ))
+
+        expectWireData(
+          """GET / HTTP/1.1
+            |Connection: close
+            |Host: example.com
+            |User-Agent: akka-http/test
+            |Transfer-Encoding: chunked
+            |Content-Type: text/plain; charset=UTF-8
+            |
+            |""")
+        expectWireData("3\nABC\n")
+        expectWireData("4\nDEFX\n")
+        expectWireData("0\n\n")
+
+        sendWireData(
+          """HTTP/1.1 200 OK
+            |Connection: close
+            |Content-Length: 0
+            |
+            |""")
+
+        expectResponse()
+
+        // explicit `requestsSub.sendComplete()` not needed
+        responses.expectComplete()
+        netOut.expectComplete()
       }
 
       "exhibits eager request stream completion" in new TestSetup {
@@ -167,7 +228,7 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
           |""")
 
       inside(expectResponse()) {
-        case HttpResponse(StatusCodes.OK, _, HttpEntity.Chunked(_, data), _) =>
+        case HttpResponse(StatusCodes.OK, _, HttpEntity.Chunked(_, data), _) ⇒
           val dataProbe = TestSubscriber.manualProbe[ChunkStreamPart]
           // but only one consumed by server
           data.take(1).to(Sink.fromSubscriber(dataProbe)).run()
@@ -181,7 +242,7 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
     }
 
     "proceed to next response once previous response's entity has been drained" in new TestSetup {
-      def twice(action: => Unit): Unit = { action; action }
+      def twice(action: ⇒ Unit): Unit = { action; action }
 
       twice {
         requestsSub.sendNext(HttpRequest())
@@ -359,7 +420,7 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
         val error @ EntityStreamException(info) = probe.expectError()
         info.summary shouldEqual "Illegal chunk termination"
 
-        responses.expectError()
+        responses.expectComplete()
         netOut.expectComplete()
         requestsSub.expectCancellation()
         netInSub.expectCancellation()
@@ -584,6 +645,167 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
         }
       }
     }
+
+    "support requests with an `Expect: 100-continue` headers" which {
+
+      "have a strict entity and receive a `100 Continue` response" in new TestSetup {
+        requestsSub.sendNext(HttpRequest(POST, headers = List(Expect.`100-continue`), entity = "ABCDEF"))
+        expectWireData(
+          """POST / HTTP/1.1
+            |Expect: 100-continue
+            |Host: example.com
+            |User-Agent: akka-http/test
+            |Content-Type: text/plain; charset=UTF-8
+            |Content-Length: 6
+            |
+            |""")
+        netOutSub.request(1)
+        netOut.expectNoMsg(50.millis)
+
+        sendWireData(
+          """HTTP/1.1 100 Continue
+            |
+            |""")
+
+        netOut.expectNext().utf8String shouldEqual "ABCDEF"
+
+        sendWireData(
+          """HTTP/1.1 200 OK
+            |Content-Length: 0
+            |
+            |""")
+
+        expectResponse() shouldEqual HttpResponse()
+
+        requestsSub.sendComplete()
+        netOut.expectComplete()
+        netInSub.sendComplete()
+        responses.expectComplete()
+      }
+
+      "have a default entity and receive a `100 Continue` response" in new TestSetup {
+        val entityParts = List("ABC", "DE", "FGH").map(ByteString(_))
+        requestsSub.sendNext(HttpRequest(POST, headers = List(Expect.`100-continue`),
+          entity = HttpEntity(ContentTypes.`application/octet-stream`, 8, Source(entityParts))))
+        expectWireData(
+          """POST / HTTP/1.1
+            |Expect: 100-continue
+            |Host: example.com
+            |User-Agent: akka-http/test
+            |Content-Type: application/octet-stream
+            |Content-Length: 8
+            |
+            |""")
+        netOutSub.request(1)
+        netOut.expectNoMsg(50.millis)
+
+        sendWireData(
+          """HTTP/1.1 100 Continue
+            |
+            |""")
+
+        netOut.expectNext().utf8String shouldEqual "ABC"
+        expectWireData("DE")
+        expectWireData("FGH")
+
+        sendWireData(
+          """HTTP/1.1 200 OK
+            |Content-Length: 0
+            |
+            |""")
+
+        expectResponse() shouldEqual HttpResponse()
+
+        requestsSub.sendComplete()
+        netOut.expectComplete()
+        netInSub.sendComplete()
+        responses.expectComplete()
+      }
+
+      "receive a normal response" in new TestSetup {
+        requestsSub.sendNext(HttpRequest(POST, headers = List(Expect.`100-continue`), entity = "ABCDEF"))
+        expectWireData(
+          """POST / HTTP/1.1
+            |Expect: 100-continue
+            |Host: example.com
+            |User-Agent: akka-http/test
+            |Content-Type: text/plain; charset=UTF-8
+            |Content-Length: 6
+            |
+            |""")
+        netOutSub.request(1)
+        netOut.expectNoMsg(50.millis)
+
+        sendWireData(
+          """HTTP/1.1 200 OK
+            |Content-Length: 0
+            |
+            |""")
+
+        expectResponse() shouldEqual HttpResponse()
+
+        expectWireData("ABCDEF")
+
+        requestsSub.sendComplete()
+        netOut.expectComplete()
+        netInSub.sendComplete()
+        responses.expectComplete()
+      }
+
+      "receive an error response" in new TestSetup {
+        requestsSub.sendNext(HttpRequest(POST, headers = List(Expect.`100-continue`), entity = "ABCDEF"))
+        requestsSub.sendComplete()
+        expectWireData(
+          """POST / HTTP/1.1
+            |Expect: 100-continue
+            |Host: example.com
+            |User-Agent: akka-http/test
+            |Content-Type: text/plain; charset=UTF-8
+            |Content-Length: 6
+            |
+            |""")
+        netOutSub.request(1)
+        netOut.expectNoMsg(50.millis)
+
+        sendWireData(
+          """HTTP/1.1 400 Bad Request
+            |Content-Length: 0
+            |
+            |""")
+
+        expectResponse() shouldEqual HttpResponse(400)
+
+        netOut.expectComplete()
+        netInSub.sendComplete()
+        responses.expectComplete()
+      }
+    }
+
+    "ignore interim 1xx responses" in new TestSetup {
+      sendStandardRequest()
+      sendWireData(
+        """HTTP/1.1 102 Processing
+          |Content-Length: 0
+          |
+          |""")
+      sendWireData(
+        """HTTP/1.1 102 Processing
+          |Content-Length: 0
+          |
+          |""")
+      sendWireData(
+        """HTTP/1.1 200 OK
+          |Content-Length: 0
+          |
+          |""")
+
+      expectResponse() shouldEqual HttpResponse()
+
+      requestsSub.sendComplete()
+      netOut.expectComplete()
+      netInSub.sendComplete()
+      responses.expectComplete()
+    }
   }
 
   class TestSetup(maxResponseContentLength: Int = -1) {
@@ -598,20 +820,19 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
     }
 
     val (netOut, netIn) = {
-      val netOut = TestSubscriber.manualProbe[ByteString]
+      val netOut = TestSubscriber.manualProbe[ByteString]()
       val netIn = TestPublisher.manualProbe[ByteString]()
 
-      RunnableGraph.fromGraph(GraphDSL.create(OutgoingConnectionBlueprint(Host("example.com"), settings, NoLogging)) { implicit b ⇒
-        client ⇒
-          import GraphDSL.Implicits._
-          Source.fromPublisher(netIn) ~> Flow[ByteString].map(SessionBytes(null, _)) ~> client.in2
-          client.out1 ~> Flow[SslTlsOutbound].collect { case SendBytes(x) ⇒ x } ~> Sink.fromSubscriber(netOut)
-          Source.fromPublisher(requests) ~> client.in1
-          client.out2 ~> Sink.fromSubscriber(responses)
-          ClosedShape
+      RunnableGraph.fromGraph(GraphDSL.create(OutgoingConnectionBlueprint(Host("example.com"), settings, NoLogging)) { implicit b ⇒ client ⇒
+        import GraphDSL.Implicits._
+        Source.fromPublisher(netIn) ~> Flow[ByteString].map(SessionBytes(null, _)) ~> client.in2
+        client.out1 ~> Flow[SslTlsOutbound].collect { case SendBytes(x) ⇒ x } ~> Sink.fromSubscriber(netOut)
+        Source.fromPublisher(requests) ~> client.in1
+        client.out2 ~> Sink.fromSubscriber(responses)
+        ClosedShape
       }).run()
 
-      netOut -> netIn
+      netOut → netIn
     }
 
     def wipeDate(string: String) =

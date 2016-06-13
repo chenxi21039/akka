@@ -184,15 +184,26 @@ Distributed Data Mode
 
 Instead of using :ref:`persistence-java` it is possible to use the :ref:`distributed_data_java` module
 as storage for the state of the sharding coordinator. In such case the state of the 
-``ShardCoordinator`` will be replicated inside a cluster by the Distributed Data module with
+``ShardCoordinator`` will be replicated inside a cluster by the :ref:`distributed_data_java` module with
 ``WriteMajority``/``ReadMajority`` consistency.
 
-This mode can be enabled by setting configuration property ``akka.cluster.sharding.state-store-mode``
-as ``ddata``. 
+This mode can be enabled by setting configuration property::
+
+    akka.cluster.sharding.state-store-mode = ddata 
+
+It is using the Distributed Data extension that must be running on all nodes in the cluster.
+Therefore you should add that extension to the configuration to make sure that it is started
+on all nodes::
+
+    akka.extensions += "akka.cluster.ddata.DistributedData"
 
 You must explicitly add the ``akka-distributed-data-experimental`` dependency to your build if
 you use this mode. It is possible to remove ``akka-persistence`` dependency from a project if it
 is not used in user code and ``remember-entities`` is ``off``.
+Using it together with ``Remember Entities`` shards will be recreated after rebalancing, however will
+not be recreated after a clean cluster start as the Sharding Coordinator state is empty after a clean cluster
+start when using ddata mode. When ``Remember Entities`` is ``on`` Sharding Region always keeps data usig persistence,
+no matter how ``State Store Mode`` is set.
 
 .. warning::
 
@@ -349,11 +360,11 @@ Inspecting cluster sharding state
 ---------------------------------
 Two requests to inspect the cluster state are available:
 
-``ClusterShard.getShardRegionStateInstance`` which will return a ``ClusterShard.ShardRegionState`` that contains
+``ShardRegion.getShardRegionStateInstance`` which will return a ``ShardRegion.ShardRegionState`` that contains
 the identifiers of the shards running in a Region and what entities are alive for each of them.
 
-``ClusterShard.getClusterShardingStatsInstance`` which will query all the regions in the cluster and return
-a ``ClusterShard.ClusterShardingStats`` containing the identifiers of the shards running in each region and a count
+``ShardRegion.GetClusterShardingStats`` which will query all the regions in the cluster and return
+a ``ShardRegion.ClusterShardingStats`` containing the identifiers of the shards running in each region and a count
 of entities that are alive in each shard.
 
 The purpose of these messages is testing and monitoring, they are not provided to give access to

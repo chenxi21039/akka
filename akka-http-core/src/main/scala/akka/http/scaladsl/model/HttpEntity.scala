@@ -6,9 +6,12 @@ package akka.http.scaladsl.model
 
 import java.util.OptionalLong
 
+import akka.http.impl.model.JavaInitialization
+
 import language.implicitConversions
 import java.io.File
-import java.lang.{ Iterable ⇒ JIterable}
+import java.nio.file.{ Path, Files }
+import java.lang.{ Iterable ⇒ JIterable }
 import scala.util.control.NonFatal
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -21,7 +24,7 @@ import akka.{ NotUsed, stream }
 import akka.http.scaladsl.model.ContentType.{ NonBinary, Binary }
 import akka.http.scaladsl.util.FastFuture
 import akka.http.javadsl.{ model ⇒ jm }
-import akka.http.impl.util.StreamUtils
+import akka.http.impl.util.{ JavaMapping, StreamUtils }
 import akka.http.impl.util.JavaMapping.Implicits._
 
 import scala.compat.java8.OptionConverters._
@@ -84,6 +87,45 @@ sealed trait HttpEntity extends jm.HttpEntity {
    */
   def withContentType(contentType: ContentType): HttpEntity
 
+  /**
+   * Apply the given size limit to this entity by returning a new entity instance which automatically verifies that the
+   * data stream encapsulated by this instance produces at most `maxBytes` data bytes. In case this verification fails
+   * the respective stream will be terminated with an `EntityStreamException` either directly at materialization
+   * time (if the Content-Length is known) or whenever more data bytes than allowed have been read.
+   *
+   * When called on `Strict` entities the method will return the entity itself if the length is within the bound,
+   * otherwise a `Default` entity with a single element data stream. This allows for potential refinement of the
+   * entity size limit at a later point (before materialization of the data stream).
+   *
+   * By default all message entities produced by the HTTP layer automatically carry the limit that is defined in the
+   * application's `max-content-length` config setting. If the entity is transformed in a way that changes the
+   * Content-Length and then another limit is applied then this new limit will be evaluated against the new
+   * Content-Length. If the entity is transformed in a way that changes the Content-Length and no new limit is applied
+   * then the previous limit will be applied against the previous Content-Length.
+   *
+   * Note that the size limit applied via this method will only have any effect if the `Source` instance contained
+   * in this entity has been appropriately modified via the `HttpEntity.limitable` method. For all entities created
+   * by the HTTP layer itself this is always the case, but if you create entities yourself and would like them to
+   * properly respect limits defined via this method you need to make sure to apply `HttpEntity.limitable` yourself.
+   */
+  override def withSizeLimit(maxBytes: Long): HttpEntity
+
+  /**
+   * Lift the size limit from this entity by returning a new entity instance which skips the size verification.
+   *
+   * By default all message entities produced by the HTTP layer automatically carry the limit that is defined in the
+   * application's `max-content-length` config setting. It is recommended to always keep an upper limit on accepted
+   * entities to avoid potential attackers flooding you with too large requests/responses, so use this method with caution.
+   *
+   * Note that the size limit applied via this method will only have any effect if the `Source` instance contained
+   * in this entity has been appropriately modified via the `HttpEntity.limitable` method. For all entities created
+   * by the HTTP layer itself this is always the case, but if you create entities yourself and would like them to
+   * properly respect limits defined via this method you need to make sure to apply `HttpEntity.limitable` yourself.
+   *
+   * See [[withSizeLimit]] for more details.
+   */
+  override def withoutSizeLimit: HttpEntity
+
   /** Java API */
   override def getContentType: jm.ContentType = contentType
 
@@ -126,6 +168,11 @@ sealed trait RequestEntity extends HttpEntity with jm.RequestEntity with Respons
    */
   def withSizeLimit(maxBytes: Long): RequestEntity
 
+  /**
+   * See [[HttpEntity#withoutSizeLimit]].
+   */
+  def withoutSizeLimit: RequestEntity
+
   def transformDataBytes(transformer: Flow[ByteString, ByteString, Any]): RequestEntity
 }
 
@@ -142,8 +189,19 @@ sealed trait ResponseEntity extends HttpEntity with jm.ResponseEntity {
    */
   def withSizeLimit(maxBytes: Long): ResponseEntity
 
+  /**
+   * See [[HttpEntity#withoutSizeLimit]]
+   */
+  def withoutSizeLimit: ResponseEntity
+
   def transformDataBytes(transformer: Flow[ByteString, ByteString, Any]): ResponseEntity
 }
+
+object ResponseEntity {
+  implicit def fromJava(entity: akka.http.javadsl.model.ResponseEntity)(implicit m: JavaMapping[akka.http.javadsl.model.ResponseEntity, ResponseEntity]): ResponseEntity =
+    JavaMapping.toScala(entity)
+}
+
 /* An entity that can be used for requests, responses, and body parts */
 sealed trait UniversalEntity extends jm.UniversalEntity with MessageEntity with BodyPartEntity {
   def withContentType(contentType: ContentType): UniversalEntity
@@ -152,6 +210,11 @@ sealed trait UniversalEntity extends jm.UniversalEntity with MessageEntity with 
    * See [[HttpEntity#withSizeLimit]].
    */
   def withSizeLimit(maxBytes: Long): UniversalEntity
+
+  /**
+   * See [[HttpEntity#withoutSizeLimit]]
+   */
+  def withoutSizeLimit: UniversalEntity
 
   def contentLength: Long
   def contentLengthOption: Option[Long] = Some(contentLength)
@@ -180,17 +243,28 @@ object HttpEntity {
     HttpEntity.Chunked.fromData(contentType, data)
 
   /**
-   * Returns either the empty entity, if the given file is empty, or a [[Default]] entity
-   * consisting of a stream of [[ByteString]] instances each containing `chunkSize` bytes
+   * Returns either the empty entity, if the given file is empty, or a [[HttpEntity.Default]] entity
+   * consisting of a stream of [[akka.util.ByteString]] instances each containing `chunkSize` bytes
    * (except for the final ByteString, which simply contains the remaining bytes).
    *
    * If the given `chunkSize` is -1 the default chunk size is used.
    */
-  def apply(contentType: ContentType, file: File, chunkSize: Int = -1): UniversalEntity = {
-    val fileLength = file.length
+  @deprecated("Use `fromPath` instead", "2.4.5")
+  def apply(contentType: ContentType, file: File, chunkSize: Int = -1): UniversalEntity =
+    fromPath(contentType, file.toPath, chunkSize)
+
+  /**
+   * Returns either the empty entity, if the given file is empty, or a [[HttpEntity.Default]] entity
+   * consisting of a stream of [[akka.util.ByteString]] instances each containing `chunkSize` bytes
+   * (except for the final ByteString, which simply contains the remaining bytes).
+   *
+   * If the given `chunkSize` is -1 the default chunk size is used.
+   */
+  def fromPath(contentType: ContentType, file: Path, chunkSize: Int = -1): UniversalEntity = {
+    val fileLength = Files.size(file)
     if (fileLength > 0)
       HttpEntity.Default(contentType, fileLength,
-        if (chunkSize > 0) FileIO.fromFile(file, chunkSize) else FileIO.fromFile(file))
+        if (chunkSize > 0) FileIO.fromPath(file, chunkSize) else FileIO.fromPath(file))
     else empty(contentType)
   }
 
@@ -199,6 +273,9 @@ object HttpEntity {
   def empty(contentType: ContentType): HttpEntity.Strict =
     if (contentType == Empty.contentType) Empty
     else HttpEntity.Strict(contentType, data = ByteString.empty)
+
+  JavaInitialization.initializeStaticFieldWith(
+    Empty, classOf[jm.HttpEntity].getField("EMPTY"))
 
   // TODO: re-establish serializability
   // TODO: equal/hashcode ?
@@ -228,7 +305,7 @@ object HttpEntity {
       if (contentType == this.contentType) this else copy(contentType = contentType)
 
     override def withSizeLimit(maxBytes: Long): UniversalEntity =
-      if (data.length <= maxBytes) this
+      if (data.length <= maxBytes || isKnownEmpty) this
       else HttpEntity.Default(contentType, data.length, limitableByteSource(Source.single(data))) withSizeLimit maxBytes
 
     override def withoutSizeLimit: UniversalEntity =
@@ -264,9 +341,10 @@ object HttpEntity {
   /**
    * The model for the entity of a "regular" unchunked HTTP message with a known non-zero length.
    */
-  final case class Default(contentType: ContentType,
-                           contentLength: Long,
-                           data: Source[ByteString, Any])
+  final case class Default(
+    contentType:   ContentType,
+    contentLength: Long,
+    data:          Source[ByteString, Any])
     extends jm.HttpEntity.Default with UniversalEntity {
     require(contentLength > 0, "contentLength must be positive (use `HttpEntity.empty(contentType)` for empty entities)")
     def isKnownEmpty = false
@@ -515,18 +593,18 @@ object HttpEntity {
    */
   private[http] def captureTermination[T <: HttpEntity](entity: T): (T, Future[Unit]) =
     entity match {
-      case x: HttpEntity.Strict ⇒ x.asInstanceOf[T] -> FastFuture.successful(())
+      case x: HttpEntity.Strict ⇒ x.asInstanceOf[T] → FastFuture.successful(())
       case x: HttpEntity.Default ⇒
         val (newData, whenCompleted) = StreamUtils.captureTermination(x.data)
-        x.copy(data = newData).asInstanceOf[T] -> whenCompleted
+        x.copy(data = newData).asInstanceOf[T] → whenCompleted
       case x: HttpEntity.Chunked ⇒
         val (newChunks, whenCompleted) = StreamUtils.captureTermination(x.chunks)
-        x.copy(chunks = newChunks).asInstanceOf[T] -> whenCompleted
+        x.copy(chunks = newChunks).asInstanceOf[T] → whenCompleted
       case x: HttpEntity.CloseDelimited ⇒
         val (newData, whenCompleted) = StreamUtils.captureTermination(x.data)
-        x.copy(data = newData).asInstanceOf[T] -> whenCompleted
+        x.copy(data = newData).asInstanceOf[T] → whenCompleted
       case x: HttpEntity.IndefiniteLength ⇒
         val (newData, whenCompleted) = StreamUtils.captureTermination(x.data)
-        x.copy(data = newData).asInstanceOf[T] -> whenCompleted
+        x.copy(data = newData).asInstanceOf[T] → whenCompleted
     }
 }

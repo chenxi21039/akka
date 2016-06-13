@@ -16,21 +16,31 @@ import scala.collection.immutable
 import scala.concurrent.Future
 import scala.util.{ Failure, Success }
 
+/**
+ * @groupname form Form field directives
+ * @groupprio form 90
+ */
 trait FormFieldDirectives extends ToNameReceptacleEnhancements {
   import FormFieldDirectives._
 
   /**
    * Extracts HTTP form fields from the request as a ``Map[String, String]``.
+   *
+   * @group form
    */
   def formFieldMap: Directive1[Map[String, String]] = _formFieldMap
 
   /**
    * Extracts HTTP form fields from the request as a ``Map[String, List[String]]``.
+   *
+   * @group form
    */
   def formFieldMultiMap: Directive1[Map[String, List[String]]] = _formFieldMultiMap
 
   /**
    * Extracts HTTP form fields from the request as a ``Seq[(String, String)]``.
+   *
+   * @group form
    */
   def formFieldSeq: Directive1[immutable.Seq[(String, String)]] = _formFieldSeq
 
@@ -38,10 +48,7 @@ trait FormFieldDirectives extends ToNameReceptacleEnhancements {
    * Extracts an HTTP form field from the request.
    * Rejects the request if the defined form field matcher(s) don't match.
    *
-   * Due to a bug in Scala 2.10, invocations of this method sometimes fail to compile with an
-   * "too many arguments for method formField" or "type mismatch" error.
-   *
-   * As a workaround add an `import FormFieldDirectives.FieldMagnet` or use Scala 2.11.x.
+   * @group form
    */
   def formField(pdm: FieldMagnet): pdm.Out = pdm()
 
@@ -49,10 +56,7 @@ trait FormFieldDirectives extends ToNameReceptacleEnhancements {
    * Extracts a number of HTTP form field from the request.
    * Rejects the request if the defined form field matcher(s) don't match.
    *
-   * Due to a bug in Scala 2.10, invocations of this method sometimes fail to compile with an
-   * "too many arguments for method formFields" or "type mismatch" error.
-   *
-   * As a workaround add an `import FormFieldDirectives.FieldMagnet` or use Scala 2.11.x.
+   * @group form
    */
   def formFields(pdm: FieldMagnet): pdm.Out = pdm()
 
@@ -85,7 +89,7 @@ object FormFieldDirectives extends FormFieldDirectives {
 
   private val _formFieldMultiMap: Directive1[Map[String, List[String]]] = {
     @tailrec def append(
-      map: Map[String, List[String]],
+      map:    Map[String, List[String]],
       fields: immutable.Seq[(String, String)]): Map[String, List[String]] = {
       if (fields.isEmpty) {
         map

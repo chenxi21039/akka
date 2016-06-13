@@ -560,7 +560,7 @@ saved snapshot matches the specified ``SnapshotSelectionCriteria`` will replay a
 
   Since it is acceptable for some applications to not use any snapshotting, it is legal to not configure a snapshot store.
   However Akka will log a warning message when this situation is detected and then continue to operate until
-  an actor tries to store a snapshot, at which point the the operation will fail (by replying with an ``SaveSnapshotFailure`` for example).
+  an actor tries to store a snapshot, at which point the operation will fail (by replying with an ``SaveSnapshotFailure`` for example).
 
   Note that :ref:`cluster_sharding_java` is using snapshots, so if you use Cluster Sharding you need to define a snapshot store plugin.
 
@@ -789,6 +789,18 @@ Here is how everything is wired together:
 
 .. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-apply-event
 
+``andThen`` can be used to define actions which will be executed following event's persistence - convenient for "side effects" like sending a message or logging.
+Notice that actions defined in ``andThen`` block are not executed on recovery:
+
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-andthen-example
+
+A snapshot of state data can be persisted by calling the ``saveStateSnapshot()`` method:
+
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-snapshot-example
+
+On recovery state data is initialized according to the latest available snapshot, then the remaining domain events are replayed, triggering the
+``applyEvent`` method.
+
 Storage plugins
 ===============
 
@@ -813,6 +825,9 @@ Applications can provide their own plugins by implementing a plugin API and acti
 Plugin development requires the following imports:
 
 .. includecode:: code/docs/persistence/LambdaPersistencePluginDocTest.java#plugin-imports
+
+Eager initialization of persistence plugin
+------------------------------------------
 
 By default, persistence plugins are started on-demand, as they are used. In some case, however, it might be beneficial
 to start a certain plugin eagerly. In order to do that, you should first add the ``akka.persistence.Persistence``

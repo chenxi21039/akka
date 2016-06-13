@@ -43,33 +43,30 @@ object MaterializationBenchmark {
   val graphWithNestedImportsBuilder = (numOfNestedGraphs: Int) => {
     var flow: Graph[FlowShape[Unit, Unit], NotUsed] = Flow[Unit].map(identity)
     for (_ <- 1 to numOfNestedGraphs) {
-      flow = GraphDSL.create(flow) { b ⇒
-        flow ⇒
-          FlowShape(flow.in, flow.out)
+      flow = GraphDSL.create(flow) { b ⇒ flow ⇒
+        FlowShape(flow.in, flow.out)
       }
     }
 
-    RunnableGraph.fromGraph(GraphDSL.create(flow) { implicit b ⇒
-      flow ⇒
-        import GraphDSL.Implicits._
-        Source.single(()) ~> flow ~> Sink.ignore
-        ClosedShape
+    RunnableGraph.fromGraph(GraphDSL.create(flow) { implicit b ⇒ flow ⇒
+      import GraphDSL.Implicits._
+      Source.single(()) ~> flow ~> Sink.ignore
+      ClosedShape
     })
   }
 
   val graphWithImportedFlowBuilder = (numOfFlows: Int) =>
-    RunnableGraph.fromGraph(GraphDSL.create(Source.single(())) { implicit b ⇒
-      source ⇒
-        import GraphDSL.Implicits._
-        val flow = Flow[Unit].map(identity)
-        var out: Outlet[Unit] = source.out
-        for (i <- 0 until numOfFlows) {
-          val flowShape = b.add(flow)
-          out ~> flowShape
-          out = flowShape.outlet
-        }
-        out ~> Sink.ignore
-        ClosedShape
+    RunnableGraph.fromGraph(GraphDSL.create(Source.single(())) { implicit b ⇒ source ⇒
+      import GraphDSL.Implicits._
+      val flow = Flow[Unit].map(identity)
+      var out: Outlet[Unit] = source.out
+      for (i <- 0 until numOfFlows) {
+        val flowShape = b.add(flow)
+        out ~> flowShape
+        out = flowShape.outlet
+      }
+      out ~> Sink.ignore
+      ClosedShape
     })
 }
 
@@ -88,10 +85,10 @@ class MaterializationBenchmark {
   var graphWithImportedFlow: RunnableGraph[NotUsed] = _
 
   @Param(Array("1", "10", "100", "1000"))
-  val complexity = 0
+  var complexity = 0
 
   @Setup
-  def setup() {
+  def setup(): Unit = {
     flowWithMap = flowWithMapBuilder(complexity)
     graphWithJunctions = graphWithJunctionsBuilder(complexity)
     graphWithNestedImports = graphWithNestedImportsBuilder(complexity)
@@ -99,27 +96,19 @@ class MaterializationBenchmark {
   }
 
   @TearDown
-  def shutdown() {
+  def shutdown(): Unit = {
     Await.result(system.terminate(), 5.seconds)
   }
 
   @Benchmark
-  def flow_with_map() {
-    flowWithMap.run()
-  }
+  def flow_with_map(): Unit = flowWithMap.run()
 
   @Benchmark
-  def graph_with_junctions() {
-    graphWithJunctions.run()
-  }
+  def graph_with_junctions(): Unit = graphWithJunctions.run()
 
   @Benchmark
-  def graph_with_nested_imports() {
-    graphWithNestedImports.run()
-  }
+  def graph_with_nested_imports(): Unit = graphWithNestedImports.run()
 
   @Benchmark
-  def graph_with_imported_flow() {
-    graphWithImportedFlow.run()
-  }
+  def graph_with_imported_flow(): Unit = graphWithImportedFlow.run()
 }

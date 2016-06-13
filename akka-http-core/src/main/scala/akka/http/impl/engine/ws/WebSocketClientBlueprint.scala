@@ -33,9 +33,10 @@ object WebSocketClientBlueprint {
   /**
    * Returns a WebSocketClientLayer that can be materialized once.
    */
-  def apply(request: WebSocketRequest,
-            settings: ClientConnectionSettings,
-            log: LoggingAdapter): Http.WebSocketClientLayer =
+  def apply(
+    request:  WebSocketRequest,
+    settings: ClientConnectionSettings,
+    log:      LoggingAdapter): Http.WebSocketClientLayer =
     (simpleTls.atopMat(handshake(request, settings, log))(Keep.right) atop
       WebSocket.framing atop
       WebSocket.stack(serverSide = false, maskingRandomFactory = settings.websocketRandomFactory, log = log)).reversed
@@ -44,16 +45,17 @@ object WebSocketClientBlueprint {
    * A bidi flow that injects and inspects the WS handshake and then goes out of the way. This BidiFlow
    * can only be materialized once.
    */
-  def handshake(request: WebSocketRequest,
-                settings: ClientConnectionSettings,
-                log: LoggingAdapter): BidiFlow[ByteString, ByteString, ByteString, ByteString, Future[WebSocketUpgradeResponse]] = {
+  def handshake(
+    request:  WebSocketRequest,
+    settings: ClientConnectionSettings,
+    log:      LoggingAdapter): BidiFlow[ByteString, ByteString, ByteString, ByteString, Future[WebSocketUpgradeResponse]] = {
     import request._
     val result = Promise[WebSocketUpgradeResponse]()
 
     val valve = StreamUtils.OneTimeValve()
 
     val (initialRequest, key) = Handshake.Client.buildRequest(uri, extraHeaders, subprotocol.toList, settings.websocketRandomFactory())
-    val hostHeader = Host(uri.authority)
+    val hostHeader = Host(uri.authority.normalizedFor(uri.scheme))
     val renderedInitialRequest =
       HttpRequestRendererFactory.renderStrict(RequestRenderingContext(initialRequest, hostHeader), settings, log)
 
@@ -67,6 +69,7 @@ object WebSocketClientBlueprint {
         // if some is available
         val parser = new HttpResponseParser(settings.parserSettings, HttpHeaderParser(settings.parserSettings)()) {
           var first = true
+          override def handleInformationalResponses = false
           override protected def parseMessage(input: ByteString, offset: Int): StateResult = {
             if (first) {
               first = false
@@ -77,7 +80,7 @@ object WebSocketClientBlueprint {
             }
           }
         }
-        parser.setRequestMethodForNextResponse(HttpMethods.GET)
+        parser.setContextForNextResponse(HttpResponseParser.ResponseContext(HttpMethods.GET, None))
 
         def onPush(elem: ByteString, ctx: Context[ByteString]): SyncDirective = {
           parser.parseBytes(elem) match {

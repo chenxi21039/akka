@@ -90,9 +90,10 @@ final private[stream] class InputStreamSinkStage(readTimeout: FiniteDuration) ex
  * INTERNAL API
  * InputStreamAdapter that interacts with InputStreamSinkStage
  */
-private[akka] class InputStreamAdapter(sharedBuffer: BlockingQueue[StreamToAdapterMessage],
-                                       sendToStage: (AdapterToStageMessage) ⇒ Unit,
-                                       readTimeout: FiniteDuration)
+private[akka] class InputStreamAdapter(
+  sharedBuffer: BlockingQueue[StreamToAdapterMessage],
+  sendToStage:  (AdapterToStageMessage) ⇒ Unit,
+  readTimeout:  FiniteDuration)
   extends InputStream {
 
   var isInitialized = false
@@ -140,7 +141,8 @@ private[akka] class InputStreamAdapter(sharedBuffer: BlockingQueue[StreamToAdapt
                 case Failed(ex) ⇒
                   isStageAlive = false
                   throw new IOException(ex)
-                case null ⇒ throw new IOException("Timeout on waiting for new data")
+                case null        ⇒ throw new IOException("Timeout on waiting for new data")
+                case Initialized ⇒ throw new IllegalStateException("message 'Initialized' must come first")
               }
             } catch {
               case ex: InterruptedException ⇒ throw new IOException(ex)
@@ -215,4 +217,3 @@ private[akka] class InputStreamAdapter(sharedBuffer: BlockingQueue[StreamToAdapt
     }
   }
 }
-

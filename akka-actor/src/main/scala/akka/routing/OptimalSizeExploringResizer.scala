@@ -44,9 +44,9 @@ case object OptimalSizeExploringResizer {
    */
   private[routing] case class ResizeRecord(
     underutilizationStreak: Option[UnderUtilizationStreak] = None,
-    messageCount: Long = 0,
-    totalQueueLength: Int = 0,
-    checkTime: Long = 0)
+    messageCount:           Long                           = 0,
+    totalQueueLength:       Int                            = 0,
+    checkTime:              Long                           = 0)
 
   /**
    * INTERNAL API
@@ -109,22 +109,22 @@ case object OptimalSizeExploringResizer {
  * The memory usage is O(n) where n is the number of sizes
  * you allow, i.e. upperBound - lowerBound.
  *
- * For documentation about the the parameters, see the reference.conf -
+ * For documentation about the parameters, see the reference.conf -
  * akka.actor.deployment.default.optimal-size-exploring-resizer
  *
  */
 @SerialVersionUID(1L)
 case class DefaultOptimalSizeExploringResizer(
-  lowerBound: PoolSize = 1,
-  upperBound: PoolSize = 30,
-  chanceOfScalingDownWhenFull: Double = 0.2,
-  actionInterval: Duration = 5.seconds,
-  numOfAdjacentSizesToConsiderDuringOptimization: Int = 16,
-  exploreStepSize: Double = 0.1,
-  downsizeRatio: Double = 0.8,
-  downsizeAfterUnderutilizedFor: Duration = 72.hours,
-  explorationProbability: Double = 0.4,
-  weightOfLatestMetric: Double = 0.5) extends OptimalSizeExploringResizer {
+  lowerBound:                                     PoolSize = 1,
+  upperBound:                                     PoolSize = 30,
+  chanceOfScalingDownWhenFull:                    Double   = 0.2,
+  actionInterval:                                 Duration = 5.seconds,
+  numOfAdjacentSizesToConsiderDuringOptimization: Int      = 16,
+  exploreStepSize:                                Double   = 0.1,
+  downsizeRatio:                                  Double   = 0.8,
+  downsizeAfterUnderutilizedFor:                  Duration = 72.hours,
+  explorationProbability:                         Double   = 0.4,
+  weightOfLatestMetric:                           Double   = 0.5) extends OptimalSizeExploringResizer {
   /**
    * Leave package accessible for testing purpose
    */
@@ -193,12 +193,13 @@ case class DefaultOptimalSizeExploringResizer(
 
     val fullyUtilized = utilized == currentSize
 
-    val newUnderutilizationStreak = if (fullyUtilized)
-      None
-    else
-      Some(UnderUtilizationStreak(
-        record.underutilizationStreak.fold(now)(_.start),
-        Math.max(record.underutilizationStreak.fold(0)(_.highestUtilization), utilized)))
+    val newUnderutilizationStreak =
+      if (fullyUtilized)
+        None
+      else
+        Some(UnderUtilizationStreak(
+          record.underutilizationStreak.fold(now)(_.start),
+          Math.max(record.underutilizationStreak.fold(0)(_.highestUtilization), utilized)))
 
     val newPerformanceLog: PerformanceLog =
       if (fullyUtilized && record.underutilizationStreak.isEmpty && record.checkTime > 0) {

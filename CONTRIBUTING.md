@@ -19,8 +19,8 @@ These guidelines mainly apply to Lightbend’s “mature” projects - not neces
 Depending on which version (or sometimes module) you want to work on, you should target a specific branch as explained below:
 
 * `master` – active development branch of Akka 2.4.x
-* `release-2.3` – maintanance branch of Akka 2.3.x
-* similarily `release-2.#` branches contain legacy versions of Akka
+* `release-2.3` – maintenance branch of Akka 2.3.x
+* similarly `release-2.#` branches contain legacy versions of Akka
 
 ## General Workflow
 
@@ -59,7 +59,7 @@ The Akka build includes a special task called `validatePullRequest` which invest
 then running tests only on those projects.
 
 For example changing something in `akka-http-core` would cause tests to be run in all projects which depend on it
-(e.g. `akka-http-core-tests`, `akka-http-marshallers-*`, `akka-docs` etc.).
+(e.g. `akka-http-tests`, `akka-http-marshallers-*`, `akka-docs` etc.).
 
 To use the task simply type, and the output should include entries like shown below:
 
@@ -121,7 +121,7 @@ All documentation must abide by the following maxims:
 
 All documentation is preferred to be in Lightbend's standard documentation format [reStructuredText](http://doc.akka.io/docs/akka/snapshot/dev/documentation.html) compiled using Lightbend's customized [Sphinx](http://sphinx.pocoo.org/) based documentation generation system, which among other things allows all code in the documentation to be externalized into compiled files and imported into the documentation.
 
-For more info, or for a starting point for new projects, look at the [Lightbend Documentation Template project](https://github.com/lightbendhub/doc-template).
+For more info, or for a starting point for new projects, look at the [Lightbend Documentation Template project](https://github.com/typesafehub/doc-template).
 
 For larger projects that have invested a lot of time and resources into their current documentation and samples scheme (like for example Play), it is understandable that it will take some time to migrate to this new model. In these cases someone from the project needs to take the responsibility of manual QA and verifier for the documentation and samples.
 
@@ -182,7 +182,7 @@ Upon a submission of a Pull Request the Github pull request builder plugin will 
     Can one of the repo owners verify this patch?
 
 This requires a member from a core team to start Pull Request validation process by posting comment consisting only of `OK TO TEST`.
-From now on, whenever new commits are pushed to the Pull Request, a validation job will be automaticaly started and the results of the validation posted to the Pull Request.
+From now on, whenever new commits are pushed to the Pull Request, a validation job will be automatically started and the results of the validation posted to the Pull Request.
 
 A Pull Request validation job can be started manually by posting `PLS BUILD` comment on the Pull Request.
 
@@ -193,7 +193,7 @@ will validate all projects that depend on `akka-persistence` (including samples)
 Also, tests tagged as `PerformanceTest` and the likes of it are excluded from PR validation.
 
 In order to force the `validatePullRequest` task to build the entire project, regardless of dependency analysis of a PRs
-changes one can use the special `PLS BUILD ALL` command (typed in a comment on github, on the Pull Request), which will cause
+changes one can use the special `PLS BUILD ALL` command (typed in a comment on Github, on the Pull Request), which will cause
 the validator to test all projects.
 
 ## Source style

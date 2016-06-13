@@ -40,7 +40,8 @@ object RemoteWatcherSpec {
     final case class Quarantined(address: Address, uid: Option[Int])
   }
 
-  class TestRemoteWatcher(heartbeatExpectedResponseAfter: FiniteDuration) extends RemoteWatcher(createFailureDetector,
+  class TestRemoteWatcher(heartbeatExpectedResponseAfter: FiniteDuration) extends RemoteWatcher(
+    createFailureDetector,
     heartbeatInterval = TurnOff,
     unreachableReaperInterval = TurnOff,
     heartbeatExpectedResponseAfter = heartbeatExpectedResponseAfter) {
@@ -61,7 +62,6 @@ object RemoteWatcherSpec {
 
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class RemoteWatcherSpec extends AkkaSpec(
   """akka {
        loglevel = INFO

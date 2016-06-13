@@ -22,6 +22,34 @@ class PathDirectivesSpec extends RoutingSpec with Inside {
     "reject [/foo/]" in test()
   }
 
+  """pathPrefix("")""" should {
+    val test = testFor(pathPrefix("") { echoUnmatchedPath })
+
+    // Should match everything because pathPrefix is used and "" is a neutral element.
+    "accept [/] and clear the unmatchedPath=" in test("")
+    "accept [/foo] and clear the unmatchedPath" in test("foo")
+    "accept [/foo/] and clear the unmatchedPath" in test("foo/")
+    "accept [/bar/] and clear the unmatchedPath" in test("bar/")
+  }
+
+  """path("" | "foo")""" should {
+    val test = testFor(path("" | "foo") { echoUnmatchedPath })
+
+    // Should not match anything apart of "/", because path requires whole path being matched.
+    "accept [/] and clear the unmatchedPath=" in test("")
+    "reject [/foo]" in test()
+    "reject [/foo/]" in test()
+    "reject [/bar/]" in test()
+  }
+
+  """path("") ~ path("foo")""" should {
+    val test = testFor(path("")(echoUnmatchedPath) ~ path("foo")(echoUnmatchedPath))
+
+    // Should match both because ~ operator is used for two exclusive routes.
+    "accept [/] and clear the unmatchedPath=" in test("")
+    "accept [/foo] and clear the unmatchedPath=" in test("")
+  }
+
   """path("foo" /)""" should {
     val test = testFor(path("foo" /) { echoUnmatchedPath })
     "reject [/foo]" in test()
@@ -103,7 +131,7 @@ class PathDirectivesSpec extends RoutingSpec with Inside {
   }
 
   "pathPrefix(Map(\"red\" -> 1, \"green\" -> 2, \"blue\" -> 3))" should {
-    val test = testFor(pathPrefix(Map("red" -> 1, "green" -> 2, "blue" -> 3)) { echoCaptureAndUnmatchedPath })
+    val test = testFor(pathPrefix(Map("red" → 1, "green" → 2, "blue" → 3)) { echoCaptureAndUnmatchedPath })
     "accept [/green]" in test("2:")
     "accept [/redsea]" in test("1:sea")
     "reject [/black]" in test()
@@ -259,20 +287,20 @@ class PathDirectivesSpec extends RoutingSpec with Inside {
 
   "PathMatchers" should {
     {
-      val test = testFor(path(Rest.tmap { case Tuple1(s) ⇒ Tuple1(s.split('-').toList) }) { echoComplete })
+      val test = testFor(path(Remaining.tmap { case Tuple1(s) ⇒ Tuple1(s.split('-').toList) }) { echoComplete })
       "support the hmap modifier in accept [/yes-no]" in test("List(yes, no)")
     }
     {
-      val test = testFor(path(Rest.map(_.split('-').toList)) { echoComplete })
+      val test = testFor(path(Remaining.map(_.split('-').toList)) { echoComplete })
       "support the map modifier in accept [/yes-no]" in test("List(yes, no)")
     }
     {
-      val test = testFor(path(Rest.tflatMap { case Tuple1(s) ⇒ Some(s).filter("yes" ==).map(x ⇒ Tuple1(x)) }) { echoComplete })
+      val test = testFor(path(Remaining.tflatMap { case Tuple1(s) ⇒ Some(s).filter("yes" ==).map(x ⇒ Tuple1(x)) }) { echoComplete })
       "support the hflatMap modifier in accept [/yes]" in test("yes")
       "support the hflatMap modifier in reject [/blub]" in test()
     }
     {
-      val test = testFor(path(Rest.flatMap(s ⇒ Some(s).filter("yes" ==))) { echoComplete })
+      val test = testFor(path(Remaining.flatMap(s ⇒ Some(s).filter("yes" ==))) { echoComplete })
       "support the flatMap modifier in accept [/yes]" in test("yes")
       "support the flatMap modifier reject [/blub]" in test()
     }
@@ -304,6 +332,17 @@ class PathDirectivesSpec extends RoutingSpec with Inside {
   }
 
   import akka.http.scaladsl.model.StatusCodes._
+
+  "the Remaining path matcher" should {
+    "extract complete path if nothing previously consumed" in {
+      val route = path(Remaining) { echoComplete }
+      Get("/pets/afdaoisd/asda/sfasfasf/asf") ~> route ~> check { responseAs[String] shouldEqual "pets/afdaoisd/asda/sfasfasf/asf" }
+    }
+    "extract remaining path when parts of path already matched" in {
+      val route = path("pets" / Remaining) { echoComplete }
+      Get("/pets/afdaoisd/asda/sfasfasf/asf") ~> route ~> check { responseAs[String] shouldEqual "afdaoisd/asda/sfasfasf/asf" }
+    }
+  }
 
   "the `redirectToTrailingSlashIfMissing` directive" should {
     val route = redirectToTrailingSlashIfMissing(Found) { completeOk }

@@ -21,7 +21,6 @@ object LoggingReceiveSpec {
   }
 }
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
 
   import LoggingReceiveSpec._
@@ -29,9 +28,9 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
     akka.loglevel=DEBUG
     akka.actor.serialize-messages = off # debug noise from serialization
     """).withFallback(AkkaSpec.testConf)
-  val appLogging = ActorSystem("logging", ConfigFactory.parseMap(Map("akka.actor.debug.receive" -> true).asJava).withFallback(config))
-  val appAuto = ActorSystem("autoreceive", ConfigFactory.parseMap(Map("akka.actor.debug.autoreceive" -> true).asJava).withFallback(config))
-  val appLifecycle = ActorSystem("lifecycle", ConfigFactory.parseMap(Map("akka.actor.debug.lifecycle" -> true).asJava).withFallback(config))
+  val appLogging = ActorSystem("logging", ConfigFactory.parseMap(Map("akka.actor.debug.receive" → true).asJava).withFallback(config))
+  val appAuto = ActorSystem("autoreceive", ConfigFactory.parseMap(Map("akka.actor.debug.autoreceive" → true).asJava).withFallback(config))
+  val appLifecycle = ActorSystem("lifecycle", ConfigFactory.parseMap(Map("akka.actor.debug.lifecycle" → true).asJava).withFallback(config))
 
   val filter = TestEvent.Mute(EventFilter.custom {
     case _: Logging.Debug ⇒ true
@@ -91,19 +90,15 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
 
         val name = actor.path.toString
         actor ! "buh"
-        within(1 second) {
-          expectMsg(Logging.Debug(actor.path.toString, actor.underlyingActor.getClass,
-            "received handled message buh from " + self))
-          expectMsg("x")
-        }
+        expectMsg(Logging.Debug(actor.path.toString, actor.underlyingActor.getClass,
+          "received handled message buh from " + self))
+        expectMsg("x")
 
         actor ! "becomenull"
 
-        within(500 millis) {
-          actor ! "bah"
-          expectMsgPF() {
-            case UnhandledMessage("bah", testActor, `actor`) ⇒ true
-          }
+        actor ! "bah"
+        expectMsgPF() {
+          case UnhandledMessage("bah", testActor, `actor`) ⇒ true
         }
       }
     }
@@ -117,11 +112,9 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
           })
         })
         actor ! "buh"
-        within(1 second) {
-          expectMsg(Logging.Debug(actor.path.toString, actor.underlyingActor.getClass,
-            "received handled message buh from " + self))
-          expectMsg("x")
-        }
+        expectMsg(Logging.Debug(actor.path.toString, actor.underlyingActor.getClass,
+          "received handled message buh from " + self))
+        expectMsg("x")
       }
     }
 
@@ -139,10 +132,11 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
         })
         val name = actor.path.toString
         actor ! PoisonPill
-        expectMsgPF() {
+        fishForMessage(hint = "received AutoReceiveMessage Envelope(PoisonPill") {
           case Logging.Debug(`name`, _, msg: String) if msg startsWith "received AutoReceiveMessage Envelope(PoisonPill" ⇒ true
+          case _ ⇒ false
         }
-        awaitCond(actor.isTerminated, 100 millis)
+        awaitCond(actor.isTerminated)
       }
     }
 
@@ -182,12 +176,13 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
           supervisor watch actor
           fishForMessage(hint = "now watched by") {
             case Logging.Debug(`aname`, `sclass`, msg: String) if msg.startsWith("now watched by") ⇒ true
-            case _ ⇒ false
+            case m ⇒ false
           }
 
           supervisor unwatch actor
-          expectMsgPF(hint = "no longer watched by") {
-            case Logging.Debug(`aname`, `sclass`, msg: String) if msg.startsWith("no longer watched by") ⇒
+          fishForMessage(hint = "no longer watched by") {
+            case Logging.Debug(`aname`, `sclass`, msg: String) if msg.startsWith("no longer watched by") ⇒ true
+            case _ ⇒ false
           }
         }
       }

@@ -58,7 +58,7 @@ Bind failures
 ^^^^^^^^^^^^^
 For example the server might be unable to bind to the given port. For example when the port
 is already taken by another application, or if the port is privileged (i.e. only usable by ``root``).
-In this case the "binding future" will fail immediatly, and we can react to if by listening on the Future's completion:
+In this case the "binding future" will fail immediately, and we can react to if by listening on the Future's completion:
 
 .. includecode2:: ../../code/docs/http/scaladsl/HttpServerExampleSpec.scala
   :snippet: binding-failure-high-level-example
@@ -97,3 +97,7 @@ and split each line before we send it to an actor for further processing:
 .. includecode2:: ../../code/docs/http/scaladsl/server/FileUploadExamplesSpec.scala
    :snippet: stream-csv-upload
 
+Configuring Server-side HTTPS
+-----------------------------
+
+For detailed documentation about configuring and using HTTPS on the server-side refer to :ref:`serverSideHTTPS-scala`.

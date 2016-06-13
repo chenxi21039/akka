@@ -8,12 +8,13 @@ import akka.stream.{ ClosedShape, ActorMaterializer, ActorMaterializerSettings, 
 import akka.stream.scaladsl._
 import akka.stream.testkit._
 import akka.stream.testkit.Utils._
+import akka.stream.impl.ReactiveStreamsCompliance
 import akka.testkit.TestEvent.Mute
 import akka.testkit.{ AkkaSpec, EventFilter, ImplicitSender, TestProbe }
-
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
+import akka.actor.Stash
 
 object ActorPublisherSpec {
 
@@ -25,6 +26,12 @@ object ActorPublisherSpec {
 
   def testPublisherProps(probe: ActorRef, useTestDispatcher: Boolean = true): Props = {
     val p = Props(new TestPublisher(probe))
+    if (useTestDispatcher) p.withDispatcher("akka.test.stream-dispatcher")
+    else p
+  }
+
+  def testPublisherWithStashProps(probe: ActorRef, useTestDispatcher: Boolean = true): Props = {
+    val p = Props(new TestPublisherWithStash(probe))
     if (useTestDispatcher) p.withDispatcher("akka.test.stream-dispatcher")
     else p
   }
@@ -51,6 +58,19 @@ object ActorPublisherSpec {
       case Boom                ⇒ throw new RuntimeException("boom") with NoStackTrace
       case ThreadName          ⇒ probe ! Thread.currentThread.getName
     }
+  }
+
+  class TestPublisherWithStash(probe: ActorRef) extends TestPublisher(probe) with Stash {
+
+    override def receive = stashing
+
+    def stashing: Receive = {
+      case "unstash" ⇒
+        unstashAll()
+        context.become(super.receive)
+      case _ ⇒ stash()
+    }
+
   }
 
   def senderProps: Props = Props[Sender].withDispatcher("akka.test.stream-dispatcher")
@@ -298,7 +318,17 @@ class ActorPublisherSpec extends AkkaSpec(ActorPublisherSpec.config) with Implic
       s.expectSubscription()
       val s2 = TestSubscriber.manualProbe[String]()
       ActorPublisher[String](ref).subscribe(s2)
-      s2.expectSubscriptionAndError().getClass should be(classOf[IllegalStateException])
+      s2.expectSubscriptionAndError().getMessage should be(s"ActorPublisher ${ReactiveStreamsCompliance.SupportsOnlyASingleSubscriber}")
+    }
+
+    "can not subscribe the same subscriber multiple times" in {
+      val probe = TestProbe()
+      val ref = system.actorOf(testPublisherProps(probe.ref))
+      val s = TestSubscriber.manualProbe[String]()
+      ActorPublisher[String](ref).subscribe(s)
+      s.expectSubscription()
+      ActorPublisher[String](ref).subscribe(s)
+      s.expectError().getMessage should be(ReactiveStreamsCompliance.CanNotSubscribeTheSameSubscriberMultipleTimes)
     }
 
     "signal onCompete when actor is stopped" in {
@@ -350,21 +380,20 @@ class ActorPublisherSpec extends AkkaSpec(ActorPublisherSpec.config) with Implic
       val sink1 = Sink.fromSubscriber(ActorSubscriber[String](system.actorOf(receiverProps(probe1.ref))))
       val sink2: Sink[String, ActorRef] = Sink.actorSubscriber(receiverProps(probe2.ref))
 
-      val senderRef2 = RunnableGraph.fromGraph(GraphDSL.create(Source.actorPublisher[Int](senderProps)) { implicit b ⇒
-        source2 ⇒
-          import GraphDSL.Implicits._
+      val senderRef2 = RunnableGraph.fromGraph(GraphDSL.create(Source.actorPublisher[Int](senderProps)) { implicit b ⇒ source2 ⇒
+        import GraphDSL.Implicits._
 
-          val merge = b.add(Merge[Int](2))
-          val bcast = b.add(Broadcast[String](2))
+        val merge = b.add(Merge[Int](2))
+        val bcast = b.add(Broadcast[String](2))
 
-          source1 ~> merge.in(0)
-          source2.out ~> merge.in(1)
+        source1 ~> merge.in(0)
+        source2.out ~> merge.in(1)
 
-          merge.out.map(_.toString) ~> bcast.in
+        merge.out.map(_.toString) ~> bcast.in
 
-          bcast.out(0).map(_ + "mark") ~> sink1
-          bcast.out(1) ~> sink2
-          ClosedShape
+        bcast.out(0).map(_ + "mark") ~> sink1
+        bcast.out(1) ~> sink2
+        ClosedShape
       }).run()
 
       (0 to 10).foreach {
@@ -443,6 +472,22 @@ class ActorPublisherSpec extends AkkaSpec(ActorPublisherSpec.config) with Implic
         .to(Sink.fromSubscriber(s)).run()
       ref ! ThreadName
       expectMsgType[String] should include("my-dispatcher1")
+    }
+
+    "handle stash" in {
+      val probe = TestProbe()
+      val ref = system.actorOf(testPublisherWithStashProps(probe.ref))
+      val p = ActorPublisher[String](ref)
+      val s = TestSubscriber.probe[String]()
+      p.subscribe(s)
+      s.request(2)
+      s.request(3)
+      ref ! "unstash"
+      probe.expectMsg(TotalDemand(5))
+      probe.expectMsg(TotalDemand(5))
+      s.request(4)
+      probe.expectMsg(TotalDemand(9))
+      s.cancel()
     }
 
   }

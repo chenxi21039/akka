@@ -9,8 +9,8 @@ import akka.http.scaladsl.settings.ParserSettings
 import scala.collection.immutable
 import scala.collection.immutable.VectorBuilder
 import akka.util.ByteString
-import akka.event.{ NoLogging, LoggingAdapter }
-import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.event.{ LoggingAdapter, NoLogging }
+import akka.stream.{ ActorMaterializer, ActorMaterializerHelper }
 import akka.stream.impl.fusing.IteratorInterpreter
 import akka.stream.scaladsl._
 import akka.http.impl.engine.parsing.BodyPartParser
@@ -22,8 +22,8 @@ import HttpCharsets._
 import akka.stream.impl.fusing.SubSource
 
 /**
- * Provides [[Multipart]] marshallers.
- * It is possible to configure the default parsing mode by providing an implicit [[ParserSettings]] instance.
+ * Provides [[akka.http.scaladsl.model.Multipart]] marshallers.
+ * It is possible to configure the default parsing mode by providing an implicit [[akka.http.scaladsl.settings.ParserSettings]] instance.
  */
 trait MultipartUnmarshallers {
 
@@ -61,13 +61,13 @@ trait MultipartUnmarshallers {
       createStrict = (_, parts) ⇒ Multipart.ByteRanges.Strict(parts))
 
   def multipartUnmarshaller[T <: Multipart, BP <: Multipart.BodyPart, BPS <: Multipart.BodyPart.Strict](
-    mediaRange: MediaRange,
-    defaultContentType: ContentType,
-    createBodyPart: (BodyPartEntity, List[HttpHeader]) ⇒ BP,
-    createStreamed: (MediaType.Multipart, Source[BP, Any]) ⇒ T,
+    mediaRange:           MediaRange,
+    defaultContentType:   ContentType,
+    createBodyPart:       (BodyPartEntity, List[HttpHeader]) ⇒ BP,
+    createStreamed:       (MediaType.Multipart, Source[BP, Any]) ⇒ T,
     createStrictBodyPart: (HttpEntity.Strict, List[HttpHeader]) ⇒ BPS,
-    createStrict: (MediaType.Multipart, immutable.Seq[BPS]) ⇒ T)(implicit log: LoggingAdapter = NoLogging, parserSettings: ParserSettings = null): FromEntityUnmarshaller[T] =
-    Unmarshaller.withMaterializer { implicit ec ⇒ mat =>
+    createStrict:         (MediaType.Multipart, immutable.Seq[BPS]) ⇒ T)(implicit log: LoggingAdapter = NoLogging, parserSettings: ParserSettings = null): FromEntityUnmarshaller[T] =
+    Unmarshaller.withMaterializer { implicit ec ⇒ mat ⇒
       entity ⇒
         if (entity.contentType.mediaType.isMultipart && mediaRange.matches(entity.contentType.mediaType)) {
           entity.contentType.mediaType.params.get("boundary") match {
@@ -75,7 +75,7 @@ trait MultipartUnmarshallers {
               FastFuture.failed(new RuntimeException("Content-Type with a multipart media type must have a 'boundary' parameter"))
             case Some(boundary) ⇒
               import BodyPartParser._
-              val effectiveParserSettings = Option(parserSettings).getOrElse(ParserSettings(ActorMaterializer.downcast(mat).system))
+              val effectiveParserSettings = Option(parserSettings).getOrElse(ParserSettings(ActorMaterializerHelper.downcast(mat).system))
               val parser = new BodyPartParser(defaultContentType, boundary, log, effectiveParserSettings)
               FastFuture.successful {
                 entity match {
@@ -97,9 +97,8 @@ trait MultipartUnmarshallers {
                     createStrict(mediaType, builder.result())
                   case _ ⇒
                     val bodyParts = entity.dataBytes
-                      .transform(() ⇒ parser)
+                      .via(parser)
                       .splitWhen(_.isInstanceOf[PartStart])
-                      .buffer(100, OverflowStrategy.backpressure) // FIXME remove (#19240)
                       .prefixAndTail(1)
                       .collect {
                         case (Seq(BodyPartStart(headers, createEntity)), entityParts) ⇒

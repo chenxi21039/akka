@@ -66,7 +66,7 @@ public abstract class DateTime {
     public abstract String weekdayStr();
 
     /**
-     * Returns the the month as a 3 letter abbreviation:
+     * Returns the month as a 3 letter abbreviation:
      * `Jan`, `Feb`, `Mar`, `Apr`, `May`, `Jun`, `Jul`, `Aug`, `Sep`, `Oct`, `Nov` or `Dec`
      */
     public abstract String monthStr();
@@ -97,6 +97,16 @@ public abstract class DateTime {
     public static DateTime now() {
         return akka.http.scaladsl.model.DateTime.now();
     }
+
+    /**
+     * Creates a new `DateTime` that represents the point in time the given number of ms earlier.
+     */
+    public abstract DateTime minus(long millis);
+
+    /**
+     * Creates a new `DateTime` that represents the point in time the given number of ms later.
+     */
+    public abstract DateTime plus(long millis);
 
     /**
      * Returns a new DateTime instance parsed from IsoDateTimeString as Some(dateTime). Returns None if

@@ -4,10 +4,10 @@
 
 package akka.http.scaladsl.server
 
-import scala.concurrent.{ Future, ExecutionContextExecutor }
-import akka.stream.{ ActorMaterializer, Materializer }
+import scala.concurrent.{ ExecutionContextExecutor, Future }
+import akka.stream.{ ActorMaterializer, ActorMaterializerHelper, Materializer }
 import akka.event.LoggingAdapter
-import akka.http.scaladsl.settings.{ RoutingSettings, ParserSettings }
+import akka.http.scaladsl.settings.{ ParserSettings, RoutingSettings }
 import akka.http.scaladsl.marshalling.{ Marshal, ToResponseMarshallable }
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.util.FastFuture
@@ -17,19 +17,19 @@ import akka.http.scaladsl.util.FastFuture._
  * INTERNAL API
  */
 private[http] class RequestContextImpl(
-  val request: HttpRequest,
-  val unmatchedPath: Uri.Path,
+  val request:          HttpRequest,
+  val unmatchedPath:    Uri.Path,
   val executionContext: ExecutionContextExecutor,
-  val materializer: Materializer,
-  val log: LoggingAdapter,
-  val settings: RoutingSettings,
-  val parserSettings: ParserSettings) extends RequestContext {
+  val materializer:     Materializer,
+  val log:              LoggingAdapter,
+  val settings:         RoutingSettings,
+  val parserSettings:   ParserSettings) extends RequestContext {
 
   def this(request: HttpRequest, log: LoggingAdapter, settings: RoutingSettings, parserSettings: ParserSettings)(implicit ec: ExecutionContextExecutor, materializer: Materializer) =
     this(request, request.uri.path, ec, materializer, log, settings, parserSettings)
 
   def this(request: HttpRequest, log: LoggingAdapter, settings: RoutingSettings)(implicit ec: ExecutionContextExecutor, materializer: Materializer) =
-    this(request, request.uri.path, ec, materializer, log, settings, ParserSettings(ActorMaterializer.downcast(materializer).system))
+    this(request, request.uri.path, ec, materializer, log, settings, ParserSettings(ActorMaterializerHelper.downcast(materializer).system))
 
   def reconfigure(executionContext: ExecutionContextExecutor, materializer: Materializer, log: LoggingAdapter, settings: RoutingSettings): RequestContext =
     copy(executionContext = executionContext, materializer = materializer, log = log, routingSettings = settings)
@@ -37,10 +37,11 @@ private[http] class RequestContextImpl(
   override def complete(trm: ToResponseMarshallable): Future[RouteResult] =
     trm(request)(executionContext)
       .fast.map(res ⇒ RouteResult.Complete(res))(executionContext)
-      .fast.recover {
+      .fast.recoverWith {
         case Marshal.UnacceptableResponseContentTypeException(supported) ⇒
-          RouteResult.Rejected(UnacceptedResponseContentTypeRejection(supported) :: Nil)
-        case RejectionError(rej) ⇒ RouteResult.Rejected(rej :: Nil)
+          attemptRecoveryFromUnacceptableResponseContentTypeException(trm, supported)
+        case RejectionError(rej) ⇒
+          Future.successful(RouteResult.Rejected(rej :: Nil))
       }(executionContext)
 
   override def reject(rejections: Rejection*): Future[RouteResult] =
@@ -89,12 +90,20 @@ private[http] class RequestContextImpl(
     case _ ⇒ this
   }
 
-  private def copy(request: HttpRequest = request,
-                   unmatchedPath: Uri.Path = unmatchedPath,
-                   executionContext: ExecutionContextExecutor = executionContext,
-                   materializer: Materializer = materializer,
-                   log: LoggingAdapter = log,
-                   routingSettings: RoutingSettings = settings,
-                   parserSettings: ParserSettings = parserSettings) =
+  /** Attempts recovering from the special case when non-2xx response is sent, yet content negotiation was unable to find a match. */
+  private def attemptRecoveryFromUnacceptableResponseContentTypeException(trm: ToResponseMarshallable, supported: Set[ContentNegotiator.Alternative]): Future[RouteResult] =
+    trm.value match {
+      case (status: StatusCode, value) if !status.isSuccess ⇒ this.withAcceptAll.complete(trm) // retry giving up content negotiation
+      case _ ⇒ Future.successful(RouteResult.Rejected(UnacceptedResponseContentTypeRejection(supported) :: Nil))
+    }
+
+  private def copy(
+    request:          HttpRequest              = request,
+    unmatchedPath:    Uri.Path                 = unmatchedPath,
+    executionContext: ExecutionContextExecutor = executionContext,
+    materializer:     Materializer             = materializer,
+    log:              LoggingAdapter           = log,
+    routingSettings:  RoutingSettings          = settings,
+    parserSettings:   ParserSettings           = parserSettings) =
     new RequestContextImpl(request, unmatchedPath, executionContext, materializer, log, routingSettings, parserSettings)
 }

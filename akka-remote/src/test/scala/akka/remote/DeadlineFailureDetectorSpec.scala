@@ -8,7 +8,6 @@ import akka.testkit.AkkaSpec
 import scala.concurrent.duration._
 import akka.remote.FailureDetector.Clock
 
-@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class DeadlineFailureDetectorSpec extends AkkaSpec {
 
   "A DeadlineFailureDetector" must {
@@ -24,7 +23,7 @@ class DeadlineFailureDetectorSpec extends AkkaSpec {
 
     def createFailureDetector(
       acceptableLostDuration: FiniteDuration,
-      clock: Clock = FailureDetector.defaultClock) =
+      clock:                  Clock          = FailureDetector.defaultClock) =
       new DeadlineFailureDetector(acceptableLostDuration, heartbeatInterval = 1.second)(clock = clock)
 
     "mark node as monitored after a series of successful heartbeats" in {

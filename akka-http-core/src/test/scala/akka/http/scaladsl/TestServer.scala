@@ -4,6 +4,8 @@
 
 package akka.http.scaladsl
 
+import javax.net.ssl.SSLContext
+
 import akka.NotUsed
 
 import scala.concurrent.duration._
@@ -54,7 +56,8 @@ object TestServer extends App {
   ////////////// helpers //////////////
 
   lazy val index = HttpResponse(
-    entity = HttpEntity(ContentTypes.`text/html(UTF-8)`,
+    entity = HttpEntity(
+      ContentTypes.`text/html(UTF-8)`,
       """|<html>
          | <body>
          |    <h1>Say hello to <i>akka-http-core</i>!</h1>

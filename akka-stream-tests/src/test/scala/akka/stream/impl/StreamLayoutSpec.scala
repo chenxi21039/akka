@@ -3,19 +3,19 @@
  */
 package akka.stream.impl
 
+import akka.stream._
 import akka.stream.scaladsl._
 import akka.testkit.AkkaSpec
-import org.reactivestreams.{ Subscription, Subscriber, Publisher }
-import akka.stream._
+import org.reactivestreams.{ Publisher, Subscriber, Subscription }
+
+import scala.concurrent.duration._
 
 class StreamLayoutSpec extends AkkaSpec {
   import StreamLayout._
 
-  def testAtomic(inPortCount: Int, outPortCount: Int): Module = new Module {
+  def testAtomic(inPortCount: Int, outPortCount: Int): Module = new AtomicModule {
     override val shape = AmorphousShape(List.fill(inPortCount)(Inlet("")), List.fill(outPortCount)(Outlet("")))
     override def replaceShape(s: Shape): Module = ???
-
-    override def subModules: Set[Module] = Set.empty
 
     override def carbonCopy: Module = ???
 
@@ -26,6 +26,8 @@ class StreamLayoutSpec extends AkkaSpec {
   def testStage(): Module = testAtomic(1, 1)
   def testSource(): Module = testAtomic(0, 1)
   def testSink(): Module = testAtomic(1, 0)
+
+  implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system).withAutoFusing(false))
 
   "StreamLayout" must {
 
@@ -97,14 +99,6 @@ class StreamLayoutSpec extends AkkaSpec {
       runnable0123a.isSource should be(false)
     }
 
-    "be able to model hierarchic linear modules" in {
-      pending
-    }
-
-    "be able to model graph layouts" in {
-      pending
-    }
-
     "be able to materialize linear layouts" in {
       val source = testSource()
       val stage1 = testStage()
@@ -118,24 +112,76 @@ class StreamLayoutSpec extends AkkaSpec {
       checkMaterialized(runnable)
     }
 
-    "be able to materialize DAG layouts" in {
-      pending
+    val tooDeepForStack = 50000
 
-    }
-    "be able to materialize cyclic layouts" in {
-      pending
-    }
-
-    "be able to model hierarchic graph modules" in {
-      pending
-    }
-
-    "be able to model hierarchic attributes" in {
-      pending
+    "fail fusing when value computation is too complex" in {
+      // this tests that the canary in to coal mine actually works
+      val g = (1 to tooDeepForStack)
+        .foldLeft(Flow[Int].mapMaterializedValue(_ ⇒ 1)) { (flow, i) ⇒
+          flow.mapMaterializedValue(x ⇒ x + i)
+        }
+      a[StackOverflowError] shouldBe thrownBy {
+        Fusing.aggressive(g)
+      }
     }
 
-    "be able to model hierarchic cycle detection" in {
-      pending
+    // Seen tests run in 9-10 seconds, these test cases are heavy on the GC
+    val veryPatient = PatienceConfig(20.seconds)
+
+    "not fail materialization when building a large graph with simple computation" when {
+
+      "starting from a Source" in {
+        val g = (1 to tooDeepForStack)
+          .foldLeft(Source.single(42).mapMaterializedValue(_ ⇒ 1))(
+            (f, i) ⇒ f.map(identity))
+        val (mat, fut) = g.toMat(Sink.seq)(Keep.both).run()
+        mat should ===(1)
+        fut.futureValue(veryPatient) should ===(List(42))
+      }
+
+      "starting from a Flow" in {
+        val g = (1 to tooDeepForStack).foldLeft(Flow[Int])((f, i) ⇒ f.map(identity))
+        val (mat, fut) = g.runWith(Source.single(42).mapMaterializedValue(_ ⇒ 1), Sink.seq)
+        mat should ===(1)
+        fut.futureValue(veryPatient) should ===(List(42))
+      }
+
+      "using .via" in {
+        val g = (1 to tooDeepForStack)
+          .foldLeft(Source.single(42).mapMaterializedValue(_ ⇒ 1))(
+            (f, i) ⇒ f.via(Flow[Int].map(identity)))
+        val (mat, fut) = g.toMat(Sink.seq)(Keep.both).run()
+        mat should ===(1)
+        fut.futureValue(veryPatient) should ===(List(42))
+      }
+    }
+
+    "not fail fusing & materialization when building a large graph with simple computation" when {
+
+      "starting from a Source" in {
+        val g = Source fromGraph Fusing.aggressive((1 to tooDeepForStack)
+          .foldLeft(Source.single(42).mapMaterializedValue(_ ⇒ 1))(
+            (f, i) ⇒ f.map(identity)))
+        val (mat, fut) = g.toMat(Sink.seq)(Keep.both).run()
+        mat should ===(1)
+        fut.futureValue(veryPatient) should ===(List(42))
+      }
+
+      "starting from a Flow" in {
+        val g = Flow fromGraph Fusing.aggressive((1 to tooDeepForStack).foldLeft(Flow[Int])((f, i) ⇒ f.map(identity)))
+        val (mat, fut) = g.runWith(Source.single(42).mapMaterializedValue(_ ⇒ 1), Sink.seq)
+        mat should ===(1)
+        fut.futureValue(veryPatient) should ===(List(42))
+      }
+
+      "using .via" in {
+        val g = Source fromGraph Fusing.aggressive((1 to tooDeepForStack)
+          .foldLeft(Source.single(42).mapMaterializedValue(_ ⇒ 1))(
+            (f, i) ⇒ f.via(Flow[Int].map(identity))))
+        val (mat, fut) = g.toMat(Sink.seq)(Keep.both).run()
+        mat should ===(1)
+        fut.futureValue(veryPatient) should ===(List(42))
+      }
     }
 
   }
@@ -174,7 +220,7 @@ class StreamLayoutSpec extends AkkaSpec {
     var publishers = Vector.empty[TestPublisher]
     var subscribers = Vector.empty[TestSubscriber]
 
-    override protected def materializeAtomic(atomic: Module, effectiveAttributes: Attributes,
+    override protected def materializeAtomic(atomic: AtomicModule, effectiveAttributes: Attributes,
                                              matVal: java.util.Map[Module, Any]): Unit = {
       for (inPort ← atomic.inPorts) {
         val subscriber = TestSubscriber(atomic, inPort)
@@ -197,8 +243,8 @@ class StreamLayoutSpec extends AkkaSpec {
 
     materializer.subscribers.size should be(materializer.publishers.size)
 
-    val inToSubscriber: Map[InPort, TestSubscriber] = materializer.subscribers.map(s ⇒ s.port -> s).toMap
-    val outToPublisher: Map[OutPort, TestPublisher] = materializer.publishers.map(s ⇒ s.port -> s).toMap
+    val inToSubscriber: Map[InPort, TestSubscriber] = materializer.subscribers.map(s ⇒ s.port → s).toMap
+    val outToPublisher: Map[OutPort, TestPublisher] = materializer.publishers.map(s ⇒ s.port → s).toMap
 
     for (publisher ← materializer.publishers) {
       publisher.owner.isAtomic should be(true)

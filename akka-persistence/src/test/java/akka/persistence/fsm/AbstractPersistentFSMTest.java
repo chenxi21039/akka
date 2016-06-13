@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 import akka.persistence.fsm.PersistentFSM.CurrentState;
 import org.junit.Test;
+import org.scalatest.junit.JUnitSuite;
 import scala.concurrent.duration.Duration;
 
 import static akka.persistence.fsm.AbstractPersistentFSMTest.WebStoreCustomerFSM.UserState;
@@ -40,7 +41,7 @@ import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.matchers.JUnitMatchers.hasItems;
 
-public class AbstractPersistentFSMTest {
+public class AbstractPersistentFSMTest extends JUnitSuite {
     private static Option<String> none = Option.none();
 
     @ClassRule
@@ -531,17 +532,25 @@ public class AbstractPersistentFSMTest {
                         stay().applying(new ItemAdded(event.getItem()))
                            .forMax(Duration.create(1, TimeUnit.SECONDS)))
                 .event(Buy.class,
+                    //#customer-andthen-example
                     (event, data) ->
                         goTo(UserState.PAID).applying(OrderExecuted.INSTANCE)
-                            .andThen(exec(cart ->
-                                reportActor.tell(new PurchaseWasMade(cart.getItems()), self()))
-                            ))
+                            .andThen(exec(cart -> {
+                                reportActor.tell(new PurchaseWasMade(cart.getItems()), self());
+                                //#customer-andthen-example
+                                saveStateSnapshot();
+                                //#customer-andthen-example
+                            })))
+                    //#customer-andthen-example
                 .event(Leave.class,
+                    //#customer-snapshot-example
                     (event, data) ->
                         stop().applying(OrderDiscarded.INSTANCE)
-                            .andThen(exec(cart ->
-                               reportActor.tell(ShoppingCardDiscarded.INSTANCE, self())
-                            )))
+                            .andThen(exec(cart -> {
+                                reportActor.tell(ShoppingCardDiscarded.INSTANCE, self());
+                                saveStateSnapshot();
+                            })))
+                    //#customer-snapshot-example
                 .event(GetCurrentCart.class, (event, data) -> stay().replying(data))
                 .event(StateTimeout$.class,
                     (event, data) ->
@@ -567,8 +576,6 @@ public class AbstractPersistentFSMTest {
                 matchEvent(Leave.class, (event, data) -> stop())
                 .event(GetCurrentCart.class, (event, data) -> stay().replying(data))
             );
-
-            initialize();
             //#customer-fsm-body
         }
 
