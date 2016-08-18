@@ -23,10 +23,10 @@ import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
 /**
- * A `Sink` is a set of stream processing steps that has one open input and an attached output.
+ * A `Sink` is a set of stream processing steps that has one open input.
  * Can be used as a `Subscriber`
  */
-final class Sink[-In, +Mat](private[stream] override val module: Module)
+final class Sink[-In, +Mat](override val module: Module)
   extends Graph[SinkShape[In], Mat] {
 
   override val shape: SinkShape[In] = module.shape.asInstanceOf[SinkShape[In]]
@@ -50,11 +50,14 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
   def runWith[Mat2](source: Graph[SourceShape[In], Mat2])(implicit materializer: Materializer): Mat2 =
     Source.fromGraph(source).to(this).run()
 
+  /**
+   * Transform only the materialized value of this Sink, leaving all other properties as they were.
+   */
   def mapMaterializedValue[Mat2](f: Mat ⇒ Mat2): Sink[In, Mat2] =
     new Sink(module.transformMaterializedValue(f.asInstanceOf[Any ⇒ Any]))
 
   /**
-   * Change the attributes of this [[Source]] to the given ones and seal the list
+   * Change the attributes of this [[Sink]] to the given ones and seal the list
    * of attributes. This means that further calls will not be able to remove these
    * attributes, but instead add new ones. Note that this
    * operation has no effect on an empty Flow (because the attributes apply
@@ -64,7 +67,7 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
     new Sink(module.withAttributes(attr))
 
   /**
-   * Add the given attributes to this Source. Further calls to `withAttributes`
+   * Add the given attributes to this Sink. Further calls to `withAttributes`
    * will not remove these attributes. Note that this
    * operation has no effect on an empty Flow (because the attributes apply
    * only to the contained processing stages).
@@ -73,7 +76,7 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
     withAttributes(module.attributes and attr)
 
   /**
-   * Add a ``name`` attribute to this Flow.
+   * Add a ``name`` attribute to this Sink.
    */
   override def named(name: String): Sink[In, Mat] = addAttributes(Attributes.name(name))
 
@@ -82,14 +85,16 @@ final class Sink[-In, +Mat](private[stream] override val module: Module)
    */
   override def async: Sink[In, Mat] = addAttributes(Attributes.asyncBoundary)
 
-  /** Converts this Scala DSL element to it's Java DSL counterpart. */
+  /**
+   * Converts this Scala DSL element to it's Java DSL counterpart.
+   */
   def asJava: javadsl.Sink[In, Mat] = new javadsl.Sink(this)
 }
 
 object Sink {
 
   /** INTERNAL API */
-  private[stream] def shape[T](name: String): SinkShape[T] = SinkShape(Inlet(name + ".in"))
+  def shape[T](name: String): SinkShape[T] = SinkShape(Inlet(name + ".in"))
 
   /**
    * A graph with the shape of a sink logically is a sink, this method makes
@@ -228,7 +233,7 @@ object Sink {
    * [[akka.stream.Supervision.Resume]] or [[akka.stream.Supervision.Restart]] the
    * element is dropped and the stream continues.
    *
-   * @see [[#mapAsyncUnordered]]
+   * See also [[Flow.mapAsyncUnordered]]
    */
   def foreachParallel[T](parallelism: Int)(f: T ⇒ Unit)(implicit ec: ExecutionContext): Sink[T, Future[Done]] =
     Flow[T].mapAsyncUnordered(parallelism)(t ⇒ Future(f(t))).toMat(Sink.ignore)(Keep.right)
@@ -344,8 +349,22 @@ object Sink {
    * For stream completion you need to pull all elements from [[akka.stream.scaladsl.SinkQueue]] including last None
    * as completion marker
    *
-   * @see [[akka.stream.scaladsl.SinkQueueWithCancel]]
+   * See also [[akka.stream.scaladsl.SinkQueueWithCancel]]
    */
   def queue[T](): Sink[T, SinkQueueWithCancel[T]] =
     Sink.fromGraph(new QueueSink())
+
+  /**
+   * Creates a real `Sink` upon receiving the first element. Internal `Sink` will not be created if there are no elements,
+   * because of completion or error.
+   *
+   * If `sinkFactory` throws an exception and the supervision decision is
+   * [[akka.stream.Supervision.Stop]] the `Future` will be completed with failure. For all other supervision options it will
+   * try to create sink with next element
+   *
+   * `fallback` will be executed when there was no elements and completed is received from upstream.
+   */
+  def lazyInit[T, M](sinkFactory: T ⇒ Future[Sink[T, M]], fallback: () ⇒ M): Sink[T, Future[M]] =
+    Sink.fromGraph(new LazySink(sinkFactory, fallback))
+
 }

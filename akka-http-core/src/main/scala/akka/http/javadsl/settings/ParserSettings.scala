@@ -5,6 +5,7 @@ package akka.http.javadsl.settings
 
 import java.util.Optional
 
+import akka.actor.ActorSystem
 import akka.http.impl.engine.parsing.BodyPartParser
 import akka.http.impl.settings.ParserSettingsImpl
 import java.{ util ⇒ ju }
@@ -32,6 +33,7 @@ abstract class ParserSettings private[akka] () extends BodyPartParser.Settings {
   def getCookieParsingMode: ParserSettings.CookieParsingMode
   def getIllegalHeaderWarnings: Boolean
   def getErrorLoggingVerbosity: ParserSettings.ErrorLoggingVerbosity
+  def getIllegalResponseHeaderValueProcessingMode: ParserSettings.IllegalResponseHeaderValueProcessingMode
   def getHeaderValueCacheLimits: ju.Map[String, Int]
   def getIncludeTlsSessionInfoHeader: Boolean
   def headerValueCacheLimits: Map[String, Int]
@@ -80,7 +82,9 @@ abstract class ParserSettings private[akka] () extends BodyPartParser.Settings {
 object ParserSettings extends SettingsCompanion[ParserSettings] {
   trait CookieParsingMode
   trait ErrorLoggingVerbosity
+  trait IllegalResponseHeaderValueProcessingMode
 
   override def create(config: Config): ParserSettings = ParserSettingsImpl(config)
   override def create(configOverrides: String): ParserSettings = ParserSettingsImpl(configOverrides)
+  override def create(system: ActorSystem): ParserSettings = create(system.settings.config)
 }

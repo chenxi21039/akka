@@ -5,12 +5,11 @@ package akka.stream.scaladsl
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.forkjoin.ThreadLocalRandom
+import java.util.concurrent.ThreadLocalRandom
 import akka.stream.{ OverflowStrategy, ActorMaterializer, ActorMaterializerSettings }
 import akka.stream.testkit._
-import akka.testkit.AkkaSpec
 
-class FlowBatchSpec extends AkkaSpec {
+class FlowBatchSpec extends StreamSpec {
 
   val settings = ActorMaterializerSettings(system)
     .withInputBuffer(initialSize = 2, maxSize = 2)

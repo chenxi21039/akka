@@ -68,6 +68,12 @@ class HeaderSpec extends FreeSpec with Matchers {
         headers.`Strict-Transport-Security`.parseFromValueString("max-age=30; includeSubDomains") shouldEqual Right(headers.`Strict-Transport-Security`(30, true))
         headers.`Strict-Transport-Security`.parseFromValueString("max-age=30; includeSubDomains; preload") shouldEqual Right(headers.`Strict-Transport-Security`(30, true))
       }
+      "successful parse run with additional values" in {
+        headers.`Strict-Transport-Security`.parseFromValueString("max-age=30; includeSubDomains; preload; dummy") shouldEqual
+          Right(headers.`Strict-Transport-Security`(30, true))
+        headers.`Strict-Transport-Security`.parseFromValueString("max-age=30; includeSubDomains; dummy; preload") shouldEqual
+          Right(headers.`Strict-Transport-Security`(30, true))
+      }
       "failing parse run" in {
         val Left(List(ErrorInfo(summary, detail))) = `Strict-Transport-Security`.parseFromValueString("max-age=30; includeSubDomains; preload;")
         summary shouldEqual "Illegal HTTP header 'Strict-Transport-Security': Invalid input 'EOI', expected OWS or token0 (line 1, column 40)"
@@ -147,7 +153,7 @@ class HeaderSpec extends FreeSpec with Matchers {
         `Last-Modified`(DateTime(2016, 2, 4, 9, 9, 0)),
         Link(Uri("http://example.com"), LinkParams.`title*`("example")),
         Location(Uri("http://example.com")),
-        `Proxy-Authenticate`(HttpChallenge("Basic", "example.com")),
+        `Proxy-Authenticate`(HttpChallenge("Basic", Some("example.com"))),
         `Sec-WebSocket-Accept`("dGhlIHNhbXBsZSBub25jZQ"),
         `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("foo"))),
         `Sec-WebSocket-Version`(Vector(13)),
@@ -155,7 +161,7 @@ class HeaderSpec extends FreeSpec with Matchers {
         `Set-Cookie`(HttpCookie("sessionId", "b0eb8b8b3ad246")),
         `Transfer-Encoding`(TransferEncodings.chunked),
         Upgrade(Vector(UpgradeProtocol("HTTP", Some("2.0")))),
-        `WWW-Authenticate`(HttpChallenge("Basic", "example.com")))
+        `WWW-Authenticate`(HttpChallenge("Basic", Some("example.com"))))
 
       responseHeaders.foreach { header ⇒
         header shouldBe 'renderInResponses

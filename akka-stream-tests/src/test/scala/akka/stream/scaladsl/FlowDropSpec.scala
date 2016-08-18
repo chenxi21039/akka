@@ -3,13 +3,12 @@
  */
 package akka.stream.scaladsl
 
-import scala.concurrent.forkjoin.ThreadLocalRandom.{ current ⇒ random }
+import java.util.concurrent.ThreadLocalRandom.{ current ⇒ random }
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.testkit._
-import akka.testkit.AkkaSpec
 
-class FlowDropSpec extends AkkaSpec with ScriptedTest {
+class FlowDropSpec extends StreamSpec with ScriptedTest {
 
   val settings = ActorMaterializerSettings(system)
     .withInputBuffer(initialSize = 2, maxSize = 16)

@@ -6,7 +6,7 @@ package akka.stream.scaladsl
 import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.concurrent.forkjoin.ThreadLocalRandom
+import java.util.concurrent.ThreadLocalRandom
 import scala.util.control.NoStackTrace
 import akka.stream.ActorMaterializer
 import akka.stream.testkit._
@@ -20,10 +20,8 @@ import scala.annotation.tailrec
 import scala.concurrent.Promise
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.LinkedBlockingQueue
-import org.scalatest.concurrent.ScalaFutures
-import akka.testkit.AkkaSpec
 
-class FlowMapAsyncSpec extends AkkaSpec {
+class FlowMapAsyncSpec extends StreamSpec {
 
   implicit val materializer = ActorMaterializer()
 

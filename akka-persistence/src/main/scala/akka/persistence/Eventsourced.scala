@@ -258,7 +258,7 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
   }
 
   private def flushJournalBatch(): Unit =
-    if (!writeInProgress) {
+    if (!writeInProgress && journalBatch.nonEmpty) {
       journal ! WriteMessages(journalBatch, self, instanceId)
       journalBatch = Vector.empty
       writeInProgress = true
@@ -580,7 +580,7 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
       eventBatch = Nil
     }
 
-    if (journalBatch.nonEmpty) flushJournalBatch()
+    flushJournalBatch()
   }
 
   private def peekApplyHandler(payload: Any): Unit =
@@ -630,15 +630,15 @@ private[persistence] trait Eventsourced extends Snapshotter with PersistenceStas
         }
       case WriteMessagesSuccessful ⇒
         writeInProgress = false
-        if (journalBatch.nonEmpty) flushJournalBatch()
+        flushJournalBatch()
 
       case WriteMessagesFailed(_) ⇒
         writeInProgress = false
         () // it will be stopped by the first WriteMessageFailure message
 
-      case _: RecoveryTick =>
-        // we may have one of these in the mailbox before the scheduled timeout
-        // is cancelled when recovery has completed, just consume it so the concrete actor never sees it
+      case _: RecoveryTick ⇒
+      // we may have one of these in the mailbox before the scheduled timeout
+      // is cancelled when recovery has completed, just consume it so the concrete actor never sees it
     }
 
     def onWriteMessageComplete(err: Boolean): Unit

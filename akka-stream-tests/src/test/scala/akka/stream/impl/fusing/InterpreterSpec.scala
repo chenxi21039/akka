@@ -5,12 +5,12 @@ package akka.stream.impl.fusing
 
 import akka.stream.impl.ConstantFun
 import akka.stream.stage._
-import akka.testkit.AkkaSpec
+import akka.stream.testkit.StreamSpec
 import akka.testkit.EventFilter
-
 import akka.stream._
+import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
 
-class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
+class InterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
   import Supervision.stoppingDecider
 
   /*
@@ -24,7 +24,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
 
   "Interpreter" must {
 
-    "implement map correctly" in new OneBoundedSetup[Int](Seq(Map((x: Int) ⇒ x + 1, stoppingDecider))) {
+    "implement map correctly" in new OneBoundedSetup[Int](Map((x: Int) ⇒ x + 1)) {
       lastEvents() should be(Set.empty)
 
       downstream.requestOne()
@@ -43,10 +43,10 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnComplete))
     }
 
-    "implement chain of maps correctly" in new OneBoundedSetup[Int](Seq(
-      Map((x: Int) ⇒ x + 1, stoppingDecider),
-      Map((x: Int) ⇒ x * 2, stoppingDecider),
-      Map((x: Int) ⇒ x + 1, stoppingDecider))) {
+    "implement chain of maps correctly" in new OneBoundedSetup[Int](
+      Map((x: Int) ⇒ x + 1),
+      Map((x: Int) ⇒ x * 2),
+      Map((x: Int) ⇒ x + 1)) {
 
       lastEvents() should be(Set.empty)
 
@@ -66,7 +66,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(Cancel))
     }
 
-    "work with only boundary ops" in new OneBoundedSetup[Int](Seq.empty) {
+    "work with only boundary ops" in new OneBoundedSetup[Int]() {
       lastEvents() should be(Set.empty)
 
       downstream.requestOne()
@@ -149,7 +149,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
     "implement take inside a chain" in new OneBoundedSetup[Int](
       Filter((x: Int) ⇒ x != 0),
       takeTwo,
-      Map((x: Int) ⇒ x + 1, stoppingDecider).toGS) {
+      Map((x: Int) ⇒ x + 1)) {
 
       lastEvents() should be(Set.empty)
 
@@ -169,7 +169,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(Cancel, OnComplete, OnNext(3)))
     }
 
-    "implement fold" in new OneBoundedSetup[Int](Seq(Fold(0, (agg: Int, x: Int) ⇒ agg + x, stoppingDecider))) {
+    "implement fold" in new OneBoundedSetup[Int](Fold(0, (agg: Int, x: Int) ⇒ agg + x)) {
       lastEvents() should be(Set.empty)
 
       downstream.requestOne()
@@ -188,7 +188,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnNext(3), OnComplete))
     }
 
-    "implement fold with proper cancel" in new OneBoundedSetup[Int](Seq(Fold(0, (agg: Int, x: Int) ⇒ agg + x, stoppingDecider))) {
+    "implement fold with proper cancel" in new OneBoundedSetup[Int](Fold(0, (agg: Int, x: Int) ⇒ agg + x)) {
 
       lastEvents() should be(Set.empty)
 
@@ -208,7 +208,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(Cancel))
     }
 
-    "work if fold completes while not in a push position" in new OneBoundedSetup[Int](Seq(Fold(0, (agg: Int, x: Int) ⇒ agg + x, stoppingDecider))) {
+    "work if fold completes while not in a push position" in new OneBoundedSetup[Int](Fold(0, (agg: Int, x: Int) ⇒ agg + x)) {
 
       lastEvents() should be(Set.empty)
 
@@ -219,7 +219,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnComplete, OnNext(0)))
     }
 
-    "implement grouped" in new OneBoundedSetup[Int](Seq(Grouped(3))) {
+    "implement grouped" in new OneBoundedSetup[Int](Grouped(3)) {
       lastEvents() should be(Set.empty)
 
       downstream.requestOne()
@@ -433,11 +433,11 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
 
     // Note, the new interpreter has no jumpback table, still did not want to remove the test
     "work with jumpback table and completed elements" in new OneBoundedSetup[Int](
-      Map((x: Int) ⇒ x, stoppingDecider).toGS,
-      Map((x: Int) ⇒ x, stoppingDecider).toGS,
+      Map((x: Int) ⇒ x),
+      Map((x: Int) ⇒ x),
       KeepGoing(),
-      Map((x: Int) ⇒ x, stoppingDecider).toGS,
-      Map((x: Int) ⇒ x, stoppingDecider).toGS) {
+      Map((x: Int) ⇒ x),
+      Map((x: Int) ⇒ x)) {
 
       lastEvents() should be(Set.empty)
 
@@ -464,8 +464,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
 
     }
 
-    "work with pushAndFinish if upstream completes with pushAndFinish" in new OneBoundedSetup[Int](Seq(
-      new PushFinishStage)) {
+    "work with pushAndFinish if upstream completes with pushAndFinish" in new OneBoundedSetup[Int](new PushFinishStage) {
 
       lastEvents() should be(Set.empty)
 
@@ -476,10 +475,10 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnNext(0), OnComplete))
     }
 
-    "work with pushAndFinish if indirect upstream completes with pushAndFinish" in new OneBoundedSetup[Int](Seq(
-      Map((x: Any) ⇒ x, stoppingDecider),
+    "work with pushAndFinish if indirect upstream completes with pushAndFinish" in new OneBoundedSetup[Int](
+      Map((x: Any) ⇒ x),
       new PushFinishStage,
-      Map((x: Any) ⇒ x, stoppingDecider))) {
+      Map((x: Any) ⇒ x)) {
 
       lastEvents() should be(Set.empty)
 
@@ -490,9 +489,9 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnNext(1), OnComplete))
     }
 
-    "work with pushAndFinish if upstream completes with pushAndFinish and downstream immediately pulls" in new OneBoundedSetup[Int](Seq(
+    "work with pushAndFinish if upstream completes with pushAndFinish and downstream immediately pulls" in new OneBoundedSetup[Int](
       new PushFinishStage,
-      Fold(0, (x: Int, y: Int) ⇒ x + y, stoppingDecider))) {
+      Fold(0, (x: Int, y: Int) ⇒ x + y)) {
 
       lastEvents() should be(Set.empty)
 
@@ -503,11 +502,18 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
       lastEvents() should be(Set(OnNext(1), OnComplete))
     }
 
-    "report error if pull is called while op is terminating" in new OneBoundedSetup[Int](Seq(new PushPullStage[Any, Any] {
-      override def onPull(ctx: Context[Any]): SyncDirective = ctx.pull()
-      override def onPush(elem: Any, ctx: Context[Any]): SyncDirective = ctx.pull()
-      override def onUpstreamFinish(ctx: Context[Any]): TerminationDirective = ctx.absorbTermination()
-    })) {
+    "report error if pull is called while op is terminating" in new OneBoundedSetup[Int](
+      new SimpleLinearGraphStage[Any] {
+        override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+          new GraphStageLogic(shape) with InHandler with OutHandler {
+            override def onPush(): Unit = pull(in)
+            override def onPull(): Unit = pull(in)
+            override def onUpstreamFinish(): Unit = if (!hasBeenPulled(in)) pull(in)
+
+            setHandlers(in, out, this)
+          }
+      }
+    ) {
       lastEvents() should be(Set.empty)
 
       downstream.requestOne()
@@ -550,14 +556,16 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
 
     }
 
+    //#20386
+    @deprecated("Usage of PushPullStage is deprecated, please use GraphStage instead", "2.4.5")
     class InvalidAbsorbTermination extends PushPullStage[Int, Int] {
       override def onPull(ctx: Context[Int]): SyncDirective = ctx.pull()
       override def onPush(elem: Int, ctx: Context[Int]): SyncDirective = ctx.push(elem)
       override def onDownstreamFinish(ctx: Context[Int]): TerminationDirective = ctx.absorbTermination()
     }
 
-    "not allow absorbTermination from onDownstreamFinish()" in new OneBoundedSetup[Int](Seq(
-      new InvalidAbsorbTermination)) {
+    // This test must be kept since it tests the compatibility layer, which while is deprecated it is still here.
+    "not allow absorbTermination from onDownstreamFinish()" in new OneBoundedSetup[Int]((new InvalidAbsorbTermination).toGS) {
       lastEvents() should be(Set.empty)
 
       EventFilter[UnsupportedOperationException]("It is not allowed to call absorbTermination() from onDownstreamFinish.", occurrences = 1).intercept {
@@ -616,6 +624,7 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
           push(out, lastElem)
         }
 
+        // note that the default value of lastElem will be always pushed if the upstream closed at the very begining without a pulling
         override def onPull(): Unit = {
           if (isClosed(in)) {
             push(out, lastElem)
@@ -632,16 +641,19 @@ class InterpreterSpec extends AkkaSpec with GraphInterpreterSpecKit {
     override val shape: FlowShape[T, T] = FlowShape(in, out)
   }
 
-  // This test is related to issue #17351
-  private[akka] class PushFinishStage(onPostStop: () ⇒ Unit = () ⇒ ()) extends PushStage[Any, Any] {
-    override def onPush(elem: Any, ctx: Context[Any]): SyncDirective =
-      ctx.pushAndFinish(elem)
+  private[akka] class PushFinishStage(onPostStop: () ⇒ Unit = () ⇒ ()) extends SimpleLinearGraphStage[Any] {
+    override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+      new GraphStageLogic(shape) with InHandler with OutHandler {
+        override def onPush(): Unit = {
+          push(out, grab(in))
+          completeStage()
+        }
+        override def onPull(): Unit = pull(in)
+        override def onUpstreamFinish(): Unit = failStage(akka.stream.testkit.Utils.TE("Cannot happen"))
+        override def postStop(): Unit = onPostStop()
 
-    override def onUpstreamFinish(ctx: Context[Any]): TerminationDirective =
-      ctx.fail(akka.stream.testkit.Utils.TE("Cannot happen"))
-
-    override def postStop(): Unit =
-      onPostStop()
+        setHandlers(in, out, this)
+      }
   }
 
 }

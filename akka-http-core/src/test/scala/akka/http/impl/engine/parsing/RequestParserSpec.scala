@@ -175,6 +175,28 @@ class RequestParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
           |""" should parseTo(HttpRequest(GET, Uri("http://x//foo").toHttpRequestTargetOriginForm, protocol = `HTTP/1.0`))
         closeAfterResponseCompletion shouldEqual Seq(true)
       }
+
+      "with additional fields in Strict-Transport-Security header" in new Test {
+        """GET /hsts HTTP/1.1
+          |Host: x
+          |Strict-Transport-Security: max-age=1; preload; dummy
+          |
+          |""" should parseTo(HttpRequest(
+          GET,
+          "/hsts",
+          headers = List(Host("x"), `Strict-Transport-Security`(1, None)),
+          protocol = `HTTP/1.1`))
+
+        """GET /hsts HTTP/1.1
+          |Host: x
+          |Strict-Transport-Security: max-age=1; dummy; preload
+          |
+          |""" should parseTo(HttpRequest(
+          GET,
+          "/hsts",
+          headers = List(Host("x"), `Strict-Transport-Security`(1, None)),
+          protocol = `HTTP/1.1`))
+      }
     }
 
     "properly parse a chunked request" - {
@@ -278,7 +300,7 @@ class RequestParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
 
     "support `rawRequestUriHeader` setting" in new Test {
       override protected def newParser: HttpRequestParser =
-        new HttpRequestParser(parserSettings, rawRequestUriHeader = true, _headerParser = HttpHeaderParser(parserSettings)())
+        new HttpRequestParser(parserSettings, rawRequestUriHeader = true, headerParser = HttpHeaderParser(parserSettings, system.log)())
 
       """GET /f%6f%6fbar?q=b%61z HTTP/1.1
         |Host: ping
@@ -453,6 +475,36 @@ class RequestParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
           |
           |""" should parseToError(422: StatusCode, ErrorInfo("TRACE requests must not have an entity"))
       }
+
+      "with additional fields in headers" in new Test {
+        """GET / HTTP/1.1
+          |Host: x; dummy
+          |
+          |""" should parseToError(
+          BadRequest,
+          ErrorInfo("Illegal 'host' header: Invalid input ' ', expected 'EOI', ':', UPPER_ALPHA, lower-reg-name-char or pct-encoded (line 1, column 3)", "x; dummy\n  ^"))
+
+        """GET / HTTP/1.1
+          |Content-length: 3; dummy
+          |
+          |""" should parseToError(
+          BadRequest,
+          ErrorInfo("Illegal `Content-Length` header value"))
+
+        """GET / HTTP/1.1
+          |Connection:keep-alive; dummy
+          |
+          |""" should parseToError(
+          BadRequest,
+          ErrorInfo("Illegal 'connection' header: Invalid input ';', expected tchar, OWS, listSep or 'EOI' (line 1, column 11)", "keep-alive; dummy\n          ^"))
+
+        """GET / HTTP/1.1
+          |Transfer-Encoding: chunked; dummy
+          |
+          |""" should parseToError(
+          BadRequest,
+          ErrorInfo("Illegal 'transfer-encoding' header: Invalid input ';', expected OWS, listSep or 'EOI' (line 1, column 8)", "chunked; dummy\n       ^"))
+      }
     }
   }
 
@@ -505,7 +557,7 @@ class RequestParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
     def multiParse(parser: HttpRequestParser)(input: Seq[String]): Seq[Either[RequestOutput, StrictEqualHttpRequest]] =
       Source(input.toList)
         .map(bytes ⇒ SessionBytes(TLSPlacebo.dummySession, ByteString(bytes)))
-        .via(parser.stage).named("parser")
+        .via(parser).named("parser")
         .splitWhen(x ⇒ x.isInstanceOf[MessageStart] || x.isInstanceOf[EntityStreamError])
         .prefixAndTail(1)
         .collect {
@@ -530,7 +582,7 @@ class RequestParserSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
         .awaitResult(awaitAtMost)
 
     protected def parserSettings: ParserSettings = ParserSettings(system)
-    protected def newParser = new HttpRequestParser(parserSettings, false, HttpHeaderParser(parserSettings)())
+    protected def newParser = new HttpRequestParser(parserSettings, false, HttpHeaderParser(parserSettings, system.log)())
 
     private def compactEntity(entity: RequestEntity): Future[RequestEntity] =
       entity match {

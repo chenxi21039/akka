@@ -6,7 +6,11 @@ Quick Start Guide
 A stream usually begins at a source, so this is also how we start an Akka
 Stream. Before we create one, we import the full complement of streaming tools:
 
-.. includecode:: ../code/docs/stream/QuickStartDocSpec.scala#imports
+.. includecode:: ../code/docs/stream/QuickStartDocSpec.scala#stream-imports
+
+If you want to execute the code samples while you read through the quick start guide, you will also need the following imports:
+
+.. includecode:: ../code/docs/stream/QuickStartDocSpec.scala#other-imports
 
 Now we will start with a rather simple source, emitting the integers 1 to 100:
 
@@ -87,7 +91,7 @@ accepts strings as its input and when materialized it will create auxiliary
 information of type ``Future[IOResult]`` (when chaining operations on
 a :class:`Source` or :class:`Flow` the type of the auxiliary information—called
 the “materialized value”—is given by the leftmost starting point; since we want
-to retain what the ``FileIO.toFile`` sink has to offer, we need to say
+to retain what the ``FileIO.toPath`` sink has to offer, we need to say
 ``Keep.right``).
 
 We can use the new and shiny :class:`Sink` we just created by

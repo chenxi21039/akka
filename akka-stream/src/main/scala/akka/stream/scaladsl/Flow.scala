@@ -25,7 +25,7 @@ import akka.NotUsed
 /**
  * A `Flow` is a set of stream processing steps that has one open input and one open output.
  */
-final class Flow[-In, +Out, +Mat](private[stream] override val module: Module)
+final class Flow[-In, +Out, +Mat](override val module: Module)
   extends FlowOpsMat[Out, Mat] with Graph[FlowShape[In, Out], Mat] {
 
   override val shape: FlowShape[In, Out] = module.shape.asInstanceOf[FlowShape[In, Out]]
@@ -335,7 +335,7 @@ object RunnableGraph {
 /**
  * Flow with attached input and output, can be executed.
  */
-final case class RunnableGraph[+Mat](private[stream] val module: StreamLayout.Module) extends Graph[ClosedShape, Mat] {
+final case class RunnableGraph[+Mat](val module: StreamLayout.Module) extends Graph[ClosedShape, Mat] {
   require(module.isRunnable)
   override def shape = ClosedShape
 
@@ -350,10 +350,17 @@ final case class RunnableGraph[+Mat](private[stream] val module: StreamLayout.Mo
    */
   def run()(implicit materializer: Materializer): Mat = materializer.materialize(this)
 
+  override def addAttributes(attr: Attributes): RunnableGraph[Mat] =
+    withAttributes(module.attributes and attr)
+
   override def withAttributes(attr: Attributes): RunnableGraph[Mat] =
     new RunnableGraph(module.withAttributes(attr))
 
-  override def named(name: String): RunnableGraph[Mat] = withAttributes(Attributes.name(name))
+  override def named(name: String): RunnableGraph[Mat] =
+    addAttributes(Attributes.name(name))
+
+  override def async: RunnableGraph[Mat] =
+    addAttributes(Attributes.asyncBoundary)
 }
 
 /**
@@ -472,7 +479,7 @@ trait FlowOps[+Out, +Mat] {
    * '''Cancels when''' downstream cancels
    *
    */
-  def map[T](f: Out ⇒ T): Repr[T] = andThen(Map(f))
+  def map[T](f: Out ⇒ T): Repr[T] = via(Map(f))
 
   /**
    * Transform each input element into an `Iterable` of output elements that is
@@ -672,7 +679,7 @@ trait FlowOps[+Out, +Mat] {
    *
    * '''Cancels when''' downstream cancels
    */
-  def grouped(n: Int): Repr[immutable.Seq[Out]] = andThen(Grouped(n))
+  def grouped(n: Int): Repr[immutable.Seq[Out]] = via(Grouped(n))
 
   /**
    * Ensure stream boundedness by limiting the number of elements from upstream.
@@ -736,7 +743,7 @@ trait FlowOps[+Out, +Mat] {
    *
    * '''Cancels when''' downstream cancels
    */
-  def sliding(n: Int, step: Int = 1): Repr[immutable.Seq[Out]] = andThen(Sliding(n, step))
+  def sliding(n: Int, step: Int = 1): Repr[immutable.Seq[Out]] = via(Sliding(n, step))
 
   /**
    * Similar to `fold` but is not a terminal operation,
@@ -777,7 +784,7 @@ trait FlowOps[+Out, +Mat] {
    *
    * See also [[FlowOps.scan]]
    */
-  def fold[T](zero: T)(f: (T, Out) ⇒ T): Repr[T] = andThen(Fold(zero, f))
+  def fold[T](zero: T)(f: (T, Out) ⇒ T): Repr[T] = via(Fold(zero, f))
 
   /**
    * Similar to `fold` but uses first element as zero element.
@@ -1584,7 +1591,7 @@ trait FlowOps[+Out, +Mat] {
    * '''Cancels when''' downstream cancels
    */
   def log(name: String, extract: Out ⇒ Any = ConstantFun.scalaIdentityFunction)(implicit log: LoggingAdapter = null): Repr[Out] =
-    andThen(Stages.Log(name, extract.asInstanceOf[Any ⇒ Any], Option(log)))
+    via(Log(name, extract.asInstanceOf[Any ⇒ Any], Option(log)))
 
   /**
    * Combine the elements of current flow and the given [[Source]] into a stream of tuples.
@@ -1822,6 +1829,14 @@ trait FlowOps[+Out, +Mat] {
 
   def named(name: String): Repr[Out]
 
+  /**
+   * Put an asynchronous boundary around this `Flow`.
+   *
+   * If this is a `SubFlow` (created e.g. by `groupBy`), this creates an
+   * asynchronous boundary around each materialized sub-flow, not the
+   * super-flow. That way, the super-flow will communicate with sub-flows
+   * asynchronously.
+   */
   def async: Repr[Out]
 
   /** INTERNAL API */

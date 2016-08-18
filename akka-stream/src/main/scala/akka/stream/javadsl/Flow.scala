@@ -73,7 +73,7 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
   import scala.collection.JavaConverters._
 
   override def shape: FlowShape[In, Out] = delegate.shape
-  private[stream] def module: StreamLayout.Module = delegate.module
+  def module: StreamLayout.Module = delegate.module
 
   override def toString: String = delegate.toString
 
@@ -1919,12 +1919,6 @@ object RunnableGraph {
       if (newRunnable eq runnable) this
       else new RunnableGraphAdapter(newRunnable)
     }
-
-    override def named(name: String): RunnableGraphAdapter[Mat] = {
-      val newRunnable = runnable.named(name)
-      if (newRunnable eq runnable) this
-      else new RunnableGraphAdapter(newRunnable)
-    }
   }
 }
 /**
@@ -1942,4 +1936,12 @@ abstract class RunnableGraph[+Mat] extends Graph[ClosedShape, Mat] {
    * Transform only the materialized value of this RunnableGraph, leaving all other properties as they were.
    */
   def mapMaterializedValue[Mat2](f: function.Function[Mat, Mat2]): RunnableGraph[Mat2]
+
+  override def withAttributes(attr: Attributes): RunnableGraph[Mat]
+
+  override def addAttributes(attr: Attributes): RunnableGraph[Mat] =
+    withAttributes(module.attributes and attr)
+
+  override def named(name: String): RunnableGraph[Mat] =
+    withAttributes(Attributes.name(name))
 }

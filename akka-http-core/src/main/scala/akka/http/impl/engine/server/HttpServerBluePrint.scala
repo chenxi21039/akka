@@ -65,7 +65,8 @@ private[http] object HttpServerBluePrint {
         websocketSupport(settings, log) atop
         tlsSupport
 
-    theStack.withAttributes(HttpAttributes.remoteAddress(remoteAddress))
+    if (settings.remoteAddressHeader && remoteAddress.isDefined) theStack.withAttributes(HttpAttributes.remoteAddress(remoteAddress))
+    else theStack
   }
 
   val tlsSupport: BidiFlow[ByteString, SslTlsOutbound, SslTlsInbound, SessionBytes, NotUsed] =
@@ -211,7 +212,7 @@ private[http] object HttpServerBluePrint {
     // the initial header parser we initially use for every connection,
     // will not be mutated, all "shared copy" parsers copy on first-write into the header cache
     val rootParser = new HttpRequestParser(parserSettings, rawRequestUriHeader,
-      HttpHeaderParser(parserSettings) { info ⇒
+      HttpHeaderParser(parserSettings, log) { info ⇒
         if (parserSettings.illegalHeaderWarnings)
           logParsingError(info withSummaryPrepended "Illegal request header", log, parserSettings.errorLoggingVerbosity)
       })
@@ -228,11 +229,7 @@ private[http] object HttpServerBluePrint {
       case x ⇒ x
     }
 
-    Flow[SessionBytes].via(
-      // each connection uses a single (private) request parser instance for all its requests
-      // which builds a cache of all header instances seen on that connection
-      rootParser.createShallowCopy().stage).named("rootParser")
-      .map(establishAbsoluteUri)
+    Flow[SessionBytes].via(rootParser).map(establishAbsoluteUri)
   }
 
   def rendering(settings: ServerSettings, log: LoggingAdapter): Flow[ResponseRenderingContext, ResponseRenderingOutput, NotUsed] = {
@@ -392,7 +389,8 @@ private[http] object HttpServerBluePrint {
             case x: EntityStreamError if messageEndPending && openRequests.isEmpty ⇒
               // client terminated the connection after receiving an early response to 100-continue
               completeStage()
-            case x ⇒ push(requestPrepOut, x)
+            case x ⇒
+              push(requestPrepOut, x)
           }
         override def onUpstreamFinish() =
           if (openRequests.isEmpty) completeStage()
@@ -414,19 +412,17 @@ private[http] object HttpServerBluePrint {
           val isEarlyResponse = messageEndPending && openRequests.isEmpty
           if (isEarlyResponse && response.status.isSuccess)
             log.warning(
-              """Sending 2xx response before end of request was received...
-                |Note that the connection will be closed after this response. Also, many clients will not read early responses!
-                |Consider waiting for the request end before dispatching this response!""".stripMargin)
+              "Sending an 2xx 'early' response before end of request was received... " +
+                "Note that the connection will be closed after this response. Also, many clients will not read early responses! " +
+                "Consider only issuing this response after the request data has been completely read!")
           val close = requestStart.closeRequested ||
-            requestStart.expect100Continue && oneHundredContinueResponsePending ||
-            isClosed(requestParsingIn) && openRequests.isEmpty ||
+            (requestStart.expect100Continue && oneHundredContinueResponsePending) ||
+            (isClosed(requestParsingIn) && openRequests.isEmpty) ||
             isEarlyResponse
+
           emit(responseCtxOut, ResponseRenderingContext(response, requestStart.method, requestStart.protocol, close),
             pullHttpResponseIn)
-          if (close) complete(responseCtxOut)
-          // when the client closes the connection, we need to pull onc more time to get the
-          // request parser to complete
-          if (close && isEarlyResponse) pull(requestParsingIn)
+          if (!isClosed(requestParsingIn) && close && requestStart.expect100Continue) pull(requestParsingIn)
         }
         override def onUpstreamFinish() =
           if (openRequests.isEmpty && isClosed(requestParsingIn)) completeStage()

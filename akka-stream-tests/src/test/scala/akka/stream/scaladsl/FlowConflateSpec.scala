@@ -10,12 +10,11 @@ import akka.stream.testkit.Utils.TE
 import akka.testkit.TestLatch
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.forkjoin.ThreadLocalRandom
+import java.util.concurrent.ThreadLocalRandom
 import akka.stream._
 import akka.stream.testkit._
-import akka.testkit.AkkaSpec
 
-class FlowConflateSpec extends AkkaSpec {
+class FlowConflateSpec extends StreamSpec {
 
   val settings = ActorMaterializerSettings(system)
     .withInputBuffer(initialSize = 2, maxSize = 2)

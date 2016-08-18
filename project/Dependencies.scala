@@ -26,12 +26,14 @@ object Dependencies {
         case "2.12.0-M2" => "2.2.5-M2"
         case "2.12.0-M3" => "2.2.5-M3"
         case "2.12.0-M4" => "2.2.6"
+        case "2.12.0-M5" => "3.0.0-RC4"
         case _ => "2.2.4"
       }
     },
     java8CompatVersion := {
       scalaVersion.value match {
         case "2.12.0-M4" => "0.8.0-RC1"
+        case "2.12.0-M5" => "0.8.0-RC3"
         case _ => "0.7.0"
       }
     }
@@ -44,7 +46,7 @@ object Dependencies {
 
     // when updating config version, update links ActorSystem ScalaDoc to link to the updated version
     val config        = "com.typesafe"                % "config"                       % "1.3.0"       // ApacheV2
-    val netty         = "io.netty"                    % "netty"                        % "3.10.3.Final" // ApacheV2
+    val netty         = "io.netty"                    % "netty"                        % "3.10.6.Final" // ApacheV2
     val scalaStm      = Def.setting { "org.scala-stm" %% "scala-stm" % scalaStmVersion.value } // Modified BSD (Scala)
 
     val scalaXml      = "org.scala-lang.modules"      %% "scala-xml"                   % "1.0.5" // Scala License
@@ -70,7 +72,7 @@ object Dependencies {
     val sprayJson   = "io.spray"                     %% "spray-json"                   % "1.3.2"       // ApacheV2
 
     // For akka-http-jackson support
-    val jackson     = "com.fasterxml.jackson.core"    % "jackson-databind"             % "2.7.4"       // ApacheV2
+    val jackson     = "com.fasterxml.jackson.core"    % "jackson-databind"             % "2.7.6"       // ApacheV2
 
     // For akka-http-testkit-java
     val junit       = "junit"                         % "junit"                        % junitVersion  // Common Public License 1.0

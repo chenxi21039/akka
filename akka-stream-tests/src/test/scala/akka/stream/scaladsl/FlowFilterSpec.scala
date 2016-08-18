@@ -5,18 +5,17 @@ package akka.stream.scaladsl
 
 import akka.stream.testkit.scaladsl.TestSink
 
-import scala.concurrent.forkjoin.ThreadLocalRandom.{ current ⇒ random }
+import java.util.concurrent.ThreadLocalRandom.{ current ⇒ random }
 import akka.stream.ActorAttributes._
 import akka.stream.Supervision._
 import akka.stream.testkit.Utils._
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.testkit._
-import akka.testkit.AkkaSpec
 
 import scala.util.control.NoStackTrace
 
-class FlowFilterSpec extends AkkaSpec with ScriptedTest {
+class FlowFilterSpec extends StreamSpec with ScriptedTest {
 
   val settings = ActorMaterializerSettings(system)
     .withInputBuffer(initialSize = 2, maxSize = 16)

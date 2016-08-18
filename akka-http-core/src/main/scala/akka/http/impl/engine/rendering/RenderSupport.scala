@@ -15,6 +15,9 @@ import akka.http.scaladsl.model._
 import akka.http.impl.util._
 import akka.http.scaladsl.model.HttpEntity.ChunkStreamPart
 
+import akka.stream.stage.{ Context, GraphStage, SyncDirective, TerminationDirective }
+import akka.stream._
+import akka.stream.scaladsl.{ Sink, Source, Flow, Keep }
 /**
  * INTERNAL API
  */
@@ -24,6 +27,20 @@ private object RenderSupport {
   val ChunkedBytes = "chunked".asciiBytes
   val KeepAliveBytes = "Keep-Alive".asciiBytes
   val CloseBytes = "close".asciiBytes
+
+  private[this] final val PreRenderedContentTypes = {
+    val m = new java.util.HashMap[ContentType, Array[Byte]](16)
+    def preRenderContentType(ct: ContentType) =
+      m.put(ct, (new ByteArrayRendering(32) ~~ headers.`Content-Type` ~~ ct ~~ CrLf).get)
+
+    import ContentTypes._
+    preRenderContentType(`application/json`)
+    preRenderContentType(`text/plain(UTF-8)`)
+    preRenderContentType(`text/xml(UTF-8)`)
+    preRenderContentType(`text/html(UTF-8)`)
+    preRenderContentType(`text/csv(UTF-8)`)
+    m
+  }
 
   def CrLf = Rendering.CrLf
 
@@ -39,9 +56,14 @@ private object RenderSupport {
     })
   }
 
-  def renderEntityContentType(r: Rendering, entity: HttpEntity) =
-    if (entity.contentType != ContentTypes.NoContentType) r ~~ headers.`Content-Type` ~~ entity.contentType ~~ CrLf
-    else r
+  def renderEntityContentType(r: Rendering, entity: HttpEntity) = {
+    val ct = entity.contentType
+    if (ct != ContentTypes.NoContentType) {
+      val preRendered = PreRenderedContentTypes.get(ct)
+      if (preRendered ne null) r ~~ preRendered // re-use pre-rendered
+      else r ~~ headers.`Content-Type` ~~ ct ~~ CrLf // render ad-hoc
+    } else r // don't render
+  }
 
   def renderByteStrings(r: ByteStringRendering, entityBytes: ⇒ Source[ByteString, Any],
                         skipEntity: Boolean = false): Source[ByteString, Any] = {
@@ -53,19 +75,31 @@ private object RenderSupport {
   }
 
   object ChunkTransformer {
-    val flow = Flow[ChunkStreamPart].transform(() ⇒ new ChunkTransformer).named("renderChunks")
+    val flow = Flow.fromGraph(new ChunkTransformer).named("renderChunks")
   }
 
-  class ChunkTransformer extends StatefulStage[HttpEntity.ChunkStreamPart, ByteString] {
-    override def initial = new State {
-      override def onPush(chunk: HttpEntity.ChunkStreamPart, ctx: Context[ByteString]): SyncDirective = {
-        val bytes = renderChunk(chunk)
-        if (chunk.isLastChunk) ctx.pushAndFinish(bytes)
-        else ctx.push(bytes)
+  class ChunkTransformer extends GraphStage[FlowShape[HttpEntity.ChunkStreamPart, ByteString]] {
+    val out: Outlet[ByteString] = Outlet("ChunkTransformer.out")
+    val in: Inlet[HttpEntity.ChunkStreamPart] = Inlet("ChunkTransformer.in")
+    val shape: FlowShape[HttpEntity.ChunkStreamPart, ByteString] = FlowShape.of(in, out)
+
+    override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+      new GraphStageLogic(shape) with InHandler with OutHandler {
+        override def onPush(): Unit = {
+          val chunk = grab(in)
+          val bytes = renderChunk(chunk)
+          push(out, bytes)
+          if (chunk.isLastChunk) completeStage()
+        }
+
+        override def onPull(): Unit = pull(in)
+
+        override def onUpstreamFinish(): Unit = {
+          emit(out, defaultLastChunkBytes)
+          completeStage()
+        }
+        setHandlers(in, out, this)
       }
-    }
-    override def onUpstreamFinish(ctx: Context[ByteString]): TerminationDirective =
-      terminationEmit(Iterator.single(defaultLastChunkBytes), ctx)
   }
 
   object CheckContentLengthTransformer {
