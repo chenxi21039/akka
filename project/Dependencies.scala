@@ -16,24 +16,19 @@ object Dependencies {
   val junitVersion = "4.12"
 
   val Versions = Seq(
-    crossScalaVersions := Seq("2.11.8"), // "2.12.0-M4"
+    crossScalaVersions := Seq("2.11.8"), // "2.12.0-RC1"
     scalaVersion := crossScalaVersions.value.head,
     scalaStmVersion := sys.props.get("akka.build.scalaStmVersion").getOrElse("0.7"),
-    scalaCheckVersion := sys.props.get("akka.build.scalaCheckVersion").getOrElse("1.11.6"),
+    scalaCheckVersion := sys.props.get("akka.build.scalaCheckVersion").getOrElse("1.13.2"),
     scalaTestVersion := {
       scalaVersion.value match {
-        case "2.12.0-M1" => "2.2.5-M1"
-        case "2.12.0-M2" => "2.2.5-M2"
-        case "2.12.0-M3" => "2.2.5-M3"
-        case "2.12.0-M4" => "2.2.6"
-        case "2.12.0-M5" => "3.0.0-RC4"
-        case _ => "2.2.4"
+        case "2.12.0-M5" => "3.0.0"
+        case _ => "3.0.0"
       }
     },
     java8CompatVersion := {
       scalaVersion.value match {
-        case "2.12.0-M4" => "0.8.0-RC1"
-        case "2.12.0-M5" => "0.8.0-RC3"
+        case x if x.startsWith("2.12.0-RC1") => "0.8.0-RC7"
         case _ => "0.7.0"
       }
     }
@@ -79,6 +74,9 @@ object Dependencies {
 
     // For Java 8 Conversions
     val java8Compat = Def.setting {"org.scala-lang.modules" %% "scala-java8-compat" % java8CompatVersion.value} // Scala License
+    
+    val aeronDriver = "io.aeron"                      % "aeron-driver"                 % "1.0.1"       // ApacheV2
+    val aeronClient = "io.aeron"                      % "aeron-client"                 % "1.0.1"       // ApacheV2
 
     object Docs {
       val sprayJson   = "io.spray"                   %%  "spray-json"                  % "1.3.2"             % "test"
@@ -101,11 +99,14 @@ object Dependencies {
       val junitIntf    = "com.novocode"                % "junit-interface"              % "0.11"             % "test" // MIT
       val scalaXml     = "org.scala-lang.modules"     %% "scala-xml"                    % "1.0.4"            % "test"
 
+      // in-memory filesystem for file related tests
+      val jimfs        = "com.google.jimfs"            % "jimfs"                        % "1.1"              % "test" // ApacheV2
+
       // metrics, measurements, perf testing
       val metrics         = "com.codahale.metrics"        % "metrics-core"                 % "3.0.2"            % "test" // ApacheV2
       val metricsJvm      = "com.codahale.metrics"        % "metrics-jvm"                  % "3.0.2"            % "test" // ApacheV2
       val latencyUtils    = "org.latencyutils"            % "LatencyUtils"                 % "1.0.3"            % "test" // Free BSD
-      val hdrHistogram    = "org.hdrhistogram"            % "HdrHistogram"                 % "2.1.8"            % "test" // CC0
+      val hdrHistogram    = "org.hdrhistogram"            % "HdrHistogram"                 % "2.1.9"            % "test" // CC0
       val metricsAll      = Seq(metrics, metricsJvm, latencyUtils, hdrHistogram)
 
       // sigar logging
@@ -138,7 +139,7 @@ object Dependencies {
 
   val actorTests = l ++= Seq(Test.junit, Test.scalatest.value, Test.commonsCodec, Test.commonsMath, Test.mockito, Test.scalacheck.value, Test.junitIntf)
 
-  val remote = l ++= Seq(netty, uncommonsMath, Test.junit, Test.scalatest.value)
+  val remote = l ++= Seq(netty, uncommonsMath, aeronDriver, aeronClient, Test.junit, Test.scalatest.value, Test.jimfs)
 
   val remoteTests = l ++= Seq(Test.junit, Test.scalatest.value, Test.scalaXml)
 
@@ -213,7 +214,7 @@ object Dependencies {
 
   lazy val streamTestkit = l ++= Seq(Test.scalatest.value, Test.scalacheck.value, Test.junit)
 
-  lazy val streamTests = l ++= Seq(Test.scalatest.value, Test.scalacheck.value, Test.junit, Test.commonsIo)
+  lazy val streamTests = l ++= Seq(Test.scalatest.value, Test.scalacheck.value, Test.junit, Test.commonsIo, Test.jimfs)
 
   lazy val streamTestsTck = l ++= Seq(Test.scalatest.value, Test.scalacheck.value, Test.junit, Test.reactiveStreamsTck)
 

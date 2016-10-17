@@ -21,11 +21,7 @@ import scala.collection.mutable.Builder
 
 class ByteStringSpec extends WordSpec with Matchers with Checkers {
 
-  //  // uncomment when developing locally to get better coverage
-  //  implicit override val generatorDrivenConfig =
-  //    PropertyCheckConfig(
-  //      minSuccessful = 1000,
-  //      minSize = 0, maxSize = 100)
+  implicit val betterGeneratorDrivenConfig = PropertyCheckConfig().copy(minSuccessful = 1000)
 
   def genSimpleByteString(min: Int, max: Int) = for {
     n ← Gen.choose(min, max)
@@ -296,36 +292,54 @@ class ByteStringSpec extends WordSpec with Matchers with Checkers {
   }
 
   "ByteString1" must {
-    "drop(0)" in {
-      ByteString1.fromString("").drop(0) should ===(ByteString.empty)
+    "drop" in {
+      ByteString1.empty.drop(-1) should ===(ByteString(""))
+      ByteString1.empty.drop(0) should ===(ByteString(""))
+      ByteString1.empty.drop(1) should ===(ByteString(""))
+      ByteString1.fromString("a").drop(-1) should ===(ByteString("a"))
       ByteString1.fromString("a").drop(0) should ===(ByteString("a"))
-    }
-    "drop(1)" in {
-      ByteString1.fromString("").drop(1) should ===(ByteString(""))
       ByteString1.fromString("a").drop(1) should ===(ByteString(""))
-      ByteString1.fromString("ab").drop(1) should ===(ByteString("b"))
-      ByteString1.fromString("xaaa").drop(1) should ===(ByteString("aaa"))
-      ByteString1.fromString("xaab").drop(1).take(2) should ===(ByteString("aa"))
+      ByteString1.fromString("a").drop(2) should ===(ByteString(""))
+      ByteString1.fromString("abc").drop(-1) should ===(ByteString("abc"))
+      ByteString1.fromString("abc").drop(0) should ===(ByteString("abc"))
+      ByteString1.fromString("abc").drop(1) should ===(ByteString("bc"))
+      ByteString1.fromString("abc").drop(2) should ===(ByteString("c"))
+      ByteString1.fromString("abc").drop(3) should ===(ByteString(""))
+      ByteString1.fromString("abc").drop(4) should ===(ByteString(""))
+      ByteString1.fromString("0123456789").drop(1).take(2) should ===(ByteString("12"))
       ByteString1.fromString("0123456789").drop(5).take(4).drop(1).take(2) should ===(ByteString("67"))
     }
-    "drop(n)" in {
-      ByteString1.fromString("ab").drop(2) should ===(ByteString(""))
-      ByteString1.fromString("ab").drop(3) should ===(ByteString(""))
+    "take" in {
+      ByteString1.empty.take(-1) should ===(ByteString(""))
+      ByteString1.empty.take(0) should ===(ByteString(""))
+      ByteString1.empty.take(1) should ===(ByteString(""))
+      ByteString1.fromString("a").take(1) should ===(ByteString("a"))
+      ByteString1.fromString("ab").take(-1) should ===(ByteString(""))
+      ByteString1.fromString("ab").take(0) should ===(ByteString(""))
+      ByteString1.fromString("ab").take(1) should ===(ByteString("a"))
+      ByteString1.fromString("ab").take(2) should ===(ByteString("ab"))
+      ByteString1.fromString("ab").take(3) should ===(ByteString("ab"))
+      ByteString1.fromString("0123456789").take(3).drop(1) should ===(ByteString("12"))
+      ByteString1.fromString("0123456789").take(10).take(8).drop(3).take(5) should ===(ByteString("34567"))
     }
   }
   "ByteString1C" must {
-    "drop(0)" in {
-      ByteString1C.fromString("").drop(0) should ===(ByteString.empty)
-      ByteString1C.fromString("a").drop(0) should ===(ByteString("a"))
-    }
-    "drop(1)" in {
+    "drop" in {
+      ByteString1C.fromString("").drop(-1) should ===(ByteString(""))
+      ByteString1C.fromString("").drop(0) should ===(ByteString(""))
       ByteString1C.fromString("").drop(1) should ===(ByteString(""))
+      ByteString1C.fromString("a").drop(-1) should ===(ByteString("a"))
+      ByteString1C.fromString("a").drop(0) should ===(ByteString("a"))
       ByteString1C.fromString("a").drop(1) should ===(ByteString(""))
-      ByteString1C.fromString("ab").drop(1) should ===(ByteString("b"))
-    }
-    "drop(n)" in {
-      ByteString1C.fromString("ab").drop(2) should ===(ByteString(""))
-      ByteString1C.fromString("ab").drop(3) should ===(ByteString(""))
+      ByteString1C.fromString("a").drop(2) should ===(ByteString(""))
+      ByteString1C.fromString("abc").drop(-1) should ===(ByteString("abc"))
+      ByteString1C.fromString("abc").drop(0) should ===(ByteString("abc"))
+      ByteString1C.fromString("abc").drop(1) should ===(ByteString("bc"))
+      ByteString1C.fromString("abc").drop(2) should ===(ByteString("c"))
+      ByteString1C.fromString("abc").drop(3) should ===(ByteString(""))
+      ByteString1C.fromString("abc").drop(4) should ===(ByteString(""))
+      ByteString1C.fromString("0123456789").drop(1).take(2) should ===(ByteString("12"))
+      ByteString1C.fromString("0123456789").drop(5).take(4).drop(1).take(2) should ===(ByteString("67"))
     }
     "take" in {
       ByteString1.fromString("abcdefg").drop(1).take(0) should ===(ByteString(""))
@@ -336,42 +350,91 @@ class ByteStringSpec extends WordSpec with Matchers with Checkers {
     }
   }
   "ByteStrings" must {
-    "drop(0)" in {
-      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(0) should ===(ByteString.empty)
-      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(0) should ===(ByteString("a"))
-      (ByteString1C.fromString("") ++ ByteString1.fromString("a")).drop(0) should ===(ByteString("a"))
-      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(0) should ===(ByteString("a"))
-      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("a")).drop(0) should ===(ByteString("aa"))
+    "drop" in {
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(Int.MinValue) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(-1) should ===(ByteString(""))
       ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(0) should ===(ByteString(""))
-    }
-    "drop(1)" in {
       ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(1) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(1) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(1) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).drop(1) should ===(ByteString("bcd"))
-      ByteStrings(Vector(ByteString1.fromString("xaaa"))).drop(1) should ===(ByteString("aaa"))
-    }
-    "drop(n)" in {
-      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(1) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(1) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).drop(3) should ===(ByteString("d"))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).drop(4) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).drop(5) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).drop(10) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(Int.MaxValue) should ===(ByteString(""))
 
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).drop(-2) should ===(ByteString("abcd"))
-      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("")).drop(-2) should ===(ByteString(""))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("")).drop(Int.MinValue) should ===(ByteString("ab"))
-      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("ab")).dropRight(Int.MinValue) should ===(ByteString("ab"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(Int.MinValue) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(-1) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(0) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(1) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(2) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).drop(Int.MaxValue) should ===(ByteString(""))
+
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(Int.MinValue) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(-1) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(0) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(1) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(2) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).drop(Int.MaxValue) should ===(ByteString(""))
+
+      val bss = ByteStrings(Vector(
+        ByteString1.fromString("a"),
+        ByteString1.fromString("bc"),
+        ByteString1.fromString("def")))
+
+      bss.drop(Int.MinValue) should ===(ByteString("abcdef"))
+      bss.drop(-1) should ===(ByteString("abcdef"))
+      bss.drop(0) should ===(ByteString("abcdef"))
+      bss.drop(1) should ===(ByteString("bcdef"))
+      bss.drop(2) should ===(ByteString("cdef"))
+      bss.drop(3) should ===(ByteString("def"))
+      bss.drop(4) should ===(ByteString("ef"))
+      bss.drop(5) should ===(ByteString("f"))
+      bss.drop(6) should ===(ByteString(""))
+      bss.drop(7) should ===(ByteString(""))
+      bss.drop(Int.MaxValue) should ===(ByteString(""))
+
+      ByteString("0123456789").drop(5).take(2) should ===(ByteString("56"))
+      ByteString("0123456789").drop(5).drop(3).take(1) should ===(ByteString("8"))
+      (ByteString1C.fromString("a") ++ ByteString1.fromString("bc")).drop(2) should ===(ByteString("c"))
     }
     "slice" in {
-      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(0, 1) should ===(ByteString("a"))
       ByteStrings(ByteString1.fromString(""), ByteString1.fromString("a")).slice(1, 1) should ===(ByteString(""))
+      // We explicitly test all edge cases to always test them, refs bug #21237
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-10, 10) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-10, 0) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-10, 1) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(0, 1) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(0, 10) should ===(ByteString("a"))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(1, 10) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(1, -2) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-10, -100) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-100, -10) should ===(ByteString(""))
+      // Get an empty if `from` is greater then `until`
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(1, 0) should ===(ByteString(""))
+
       ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(2, 2) should ===(ByteString(""))
       ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(2, 3) should ===(ByteString("c"))
       ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(2, 4) should ===(ByteString("cd"))
       ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(3, 4) should ===(ByteString("d"))
-      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(10, 100) should ===(ByteString(""))
+      // Can obtain expected results from 6 basic patterns
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(-10, 10) should ===(ByteString("abcd"))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(-10, 0) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(-10, 4) should ===(ByteString("abcd"))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(0, 4) should ===(ByteString("abcd"))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(1, -2) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(0, 10) should ===(ByteString("abcd"))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(-10, -100) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(-100, -10) should ===(ByteString(""))
+
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(1, -2) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-10, -100) should ===(ByteString(""))
+      ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).slice(-100, -10) should ===(ByteString(""))
+
+      // various edge cases using raw ByteString1
+      ByteString1.fromString("cd").slice(100, 10) should ===(ByteString(""))
+      ByteString1.fromString("cd").slice(100, 1000) should ===(ByteString(""))
+      ByteString1.fromString("cd").slice(-10, -5) should ===(ByteString(""))
+      ByteString1.fromString("cd").slice(-2, -5) should ===(ByteString(""))
+      ByteString1.fromString("cd").slice(-2, 1) should ===(ByteString("c"))
+      ByteString1.fromString("abcd").slice(1, -1) should ===(ByteString(""))
+
+      // Get an empty if `from` is greater than `until`
+      ByteStrings(ByteString1.fromString("ab"), ByteString1.fromString("cd")).slice(4, 0) should ===(ByteString(""))
     }
     "dropRight" in {
       ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("")).dropRight(0) should ===(ByteString("a"))
@@ -384,6 +447,9 @@ class ByteStringSpec extends WordSpec with Matchers with Checkers {
       ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("bc")).dropRight(3) should ===(ByteString(""))
     }
     "take" in {
+      ByteString.empty.take(-1) should ===(ByteString(""))
+      ByteString.empty.take(0) should ===(ByteString(""))
+      ByteString.empty.take(1) should ===(ByteString(""))
       ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("bc")).drop(1).take(0) should ===(ByteString(""))
       ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("bc")).drop(1).take(-1) should ===(ByteString(""))
       ByteStrings(ByteString1.fromString("a"), ByteString1.fromString("bc")).drop(1).take(-2) should ===(ByteString(""))

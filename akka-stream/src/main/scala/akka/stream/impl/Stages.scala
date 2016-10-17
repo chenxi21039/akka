@@ -3,17 +3,12 @@
  */
 package akka.stream.impl
 
-import akka.event.LoggingAdapter
 import akka.stream.ActorAttributes.SupervisionStrategy
 import akka.stream.Attributes._
 import akka.stream.Supervision.Decider
 import akka.stream._
-import akka.stream.impl.StreamLayout._
 import akka.stream.stage.AbstractStage.PushPullGraphStage
 import akka.stream.stage.Stage
-import org.reactivestreams.Processor
-
-import scala.collection.immutable
 
 /**
  * INTERNAL API
@@ -45,6 +40,7 @@ object Stages {
     val dropWhile = name("dropWhile")
     val scan = name("scan")
     val fold = name("fold")
+    val foldAsync = name("foldAsync")
     val reduce = name("reduce")
     val intersperse = name("intersperse")
     val buffer = name("buffer")
@@ -80,8 +76,10 @@ object Stages {
     val zip = name("zip")
     val zipN = name("zipN")
     val zipWithN = name("zipWithN")
+    val zipWithIndex = name("zipWithIndex")
     val unzip = name("unzip")
     val concat = name("concat")
+    val orElse = name("orElse")
     val repeat = name("repeat")
     val unfold = name("unfold")
     val unfoldAsync = name("unfoldAsync")

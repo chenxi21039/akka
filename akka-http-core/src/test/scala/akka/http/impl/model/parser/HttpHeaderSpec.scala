@@ -140,6 +140,8 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
           """Fancy yes="n:o",nonce=42""")
       """Authorization: Fancy yes=no,nonce="4\\2"""" =!=
         Authorization(GenericHttpCredentials("Fancy", Map("yes" → "no", "nonce" → """4\2""")))
+      """Authorization: Other yes=no,empty=""""" =!=
+        Authorization(GenericHttpCredentials("Other", Map("yes" → "no", "empty" → "")))
       "Authorization: Basic Qm9iOg==" =!=
         Authorization(BasicHttpCredentials("Bob", ""))
       """Authorization: Digest name=Bob""" =!=
@@ -182,6 +184,8 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       "Content-Disposition: form-data" =!= `Content-Disposition`(ContentDispositionTypes.`form-data`)
       "Content-Disposition: attachment; name=field1; filename=\"file/txt\"" =!=
         `Content-Disposition`(ContentDispositionTypes.attachment, Map("name" → "field1", "filename" → "file/txt"))
+      "Content-Disposition: attachment; name=field1; other=\"\"" =!=
+        `Content-Disposition`(ContentDispositionTypes.attachment, Map("name" → "field1", "other" → ""))
     }
 
     "Content-Encoding" in {
@@ -293,6 +297,8 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       "Host: [2001:db8::1]" =!= Host("[2001:db8::1]")
       "Host: [::FFFF:129.144.52.38]" =!= Host("[::FFFF:129.144.52.38]")
       "Host: spray.io:80000" =!= ErrorInfo("Illegal HTTP header 'Host': requirement failed", "Illegal port: 80000")
+      "Host: 127.0.0.1:9000" =!= Host("127.0.0.1", 9000)
+      "Host: 127.0.0.1" =!= Host("127.0.0.1")
     }
 
     "If-Match" in {

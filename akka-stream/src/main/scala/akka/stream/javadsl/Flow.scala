@@ -3,18 +3,20 @@
  */
 package akka.stream.javadsl
 
-import akka.{ NotUsed, Done }
+import akka.{ Done, NotUsed }
 import akka.event.LoggingAdapter
-import akka.japi.{ function, Pair }
+import akka.japi.{ Pair, function }
 import akka.stream.impl.{ ConstantFun, StreamLayout }
 import akka.stream._
 import akka.stream.stage.Stage
 import org.reactivestreams.Processor
+
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.FiniteDuration
 import akka.japi.Util
 import java.util.Comparator
 import java.util.concurrent.CompletionStage
+
 import scala.compat.java8.FutureConverters._
 
 object Flow {
@@ -332,8 +334,9 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
   /**
    * Transform this stream by applying the given function to each of the elements
    * as they pass through this processing step. The function returns a `CompletionStage` and the
-   * value of that future will be emitted downstream. As many futures as requested elements by
-   * downstream may run in parallel and may complete in any order, but the elements that
+   * value of that future will be emitted downstream. The number of CompletionStages
+   * that shall run in parallel is given as the first argument to ``mapAsync``.
+   * These CompletionStages may complete in any order, but the elements that
    * are emitted downstream are in the same order as received from upstream.
    *
    * If the function `f` throws an exception or if the `CompletionStage` is completed
@@ -363,10 +366,10 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
   /**
    * Transform this stream by applying the given function to each of the elements
    * as they pass through this processing step. The function returns a `CompletionStage` and the
-   * value of that future will be emitted downstream. As many futures as requested elements by
-   * downstream may run in parallel and each processed element will be emitted downstream
-   * as soon as it is ready, i.e. it is possible that the elements are not emitted downstream
-   * in the same order as received from upstream.
+   * value of that future will be emitted downstream. The number of CompletionStages
+   * that shall run in parallel is given as the first argument to ``mapAsyncUnordered``.
+   * Each processed element will be emitted downstream as soon as it is ready, i.e. it is possible
+   * that the elements are not emitted downstream in the same order as received from upstream.
    *
    * If the function `f` throws an exception or if the `CompletionStage` is completed
    * with failure and the supervision decision is [[akka.stream.Supervision#stop]]
@@ -567,6 +570,25 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
    */
   def fold[T](zero: T)(f: function.Function2[T, Out, T]): javadsl.Flow[In, T, Mat] =
     new Flow(delegate.fold(zero)(f.apply))
+
+  /**
+   * Similar to `fold` but with an asynchronous function.
+   * Applies the given function towards its current and next value,
+   * yielding the next current value.
+   *
+   * If the function `f` returns a failure and the supervision decision is
+   * [[akka.stream.Supervision.Restart]] current value starts at `zero` again
+   * the stream will continue.
+   *
+   * '''Emits when''' upstream completes
+   *
+   * '''Backpressures when''' downstream backpressures
+   *
+   * '''Completes when''' upstream completes
+   *
+   * '''Cancels when''' downstream cancels
+   */
+  def foldAsync[T](zero: T)(f: function.Function2[T, Out, CompletionStage[T]]): javadsl.Flow[In, T, Mat] = new Flow(delegate.foldAsync(zero) { (out, in) ⇒ f(out, in).toScala })
 
   /**
    * Similar to `fold` but uses first element as zero element.
@@ -1341,6 +1363,46 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
     new Flow(delegate.prependMat(that)(combinerToScala(matF)))
 
   /**
+   * Provides a secondary source that will be consumed if this source completes without any
+   * elements passing by. As soon as the first element comes through this stream, the alternative
+   * will be cancelled.
+   *
+   * Note that this Flow will be materialized together with the [[Source]] and just kept
+   * from producing elements by asserting back-pressure until its time comes or it gets
+   * cancelled.
+   *
+   * On errors the stage is failed regardless of source of the error.
+   *
+   * '''Emits when''' element is available from first stream or first stream closed without emitting any elements and an element
+   *                  is available from the second stream
+   *
+   * '''Backpressures when''' downstream backpressures
+   *
+   * '''Completes when''' the primary stream completes after emitting at least one element, when the primary stream completes
+   *                      without emitting and the secondary stream already has completed or when the secondary stream completes
+   *
+   * '''Cancels when''' downstream cancels and additionally the alternative is cancelled as soon as an element passes
+   *                    by from this stream.
+   */
+  def orElse[T >: Out, M](secondary: Graph[SourceShape[T], M]): javadsl.Flow[In, T, Mat] =
+    new Flow(delegate.orElse(secondary))
+
+  /**
+   * Provides a secondary source that will be consumed if this source completes without any
+   * elements passing by. As soon as the first element comes through this stream, the alternative
+   * will be cancelled.
+   *
+   * It is recommended to use the internally optimized `Keep.left` and `Keep.right` combiners
+   * where appropriate instead of manually writing functions that pass through one of the values.
+   *
+   * @see [[#orElse]]
+   */
+  def orElseMat[T >: Out, M2, M3](
+    secondary: Graph[SourceShape[T], M2],
+    matF:      function.Function2[Mat, M2, M3]): javadsl.Flow[In, T, M3] =
+    new Flow(delegate.orElseMat(secondary)(combinerToScala(matF)))
+
+  /**
    * Attaches the given [[Sink]] to this [[Flow]], meaning that elements that passes
    * through will also be sent to the [[Sink]].
    *
@@ -1576,6 +1638,21 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
     new Flow(delegate.zipWithMat[Out2, Out3, M, M2](that)(combinerToScala(combine))(combinerToScala(matF)))
 
   /**
+   * Combine the elements of current flow into a stream of tuples consisting
+   * of all elements paired with their index. Indices start at 0.
+   *
+   * '''Emits when''' upstream emits an element and is paired with their index
+   *
+   * '''Backpressures when''' downstream backpressures
+   *
+   * '''Completes when''' upstream completes
+   *
+   * '''Cancels when''' downstream cancels
+   */
+  def zipWithIndex: Flow[In, Pair[Out @uncheckedVariance, Long], Mat] =
+    new Flow(delegate.zipWithIndex.map { case (elem, index) ⇒ Pair(elem, index) })
+
+  /**
    * If the first element has not passed through this stage before the provided timeout, the stream is failed
    * with a [[java.util.concurrent.TimeoutException]].
    *
@@ -1735,8 +1812,8 @@ final class Flow[-In, +Out, +Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends
   def detach: javadsl.Flow[In, Out, Mat] = new Flow(delegate.detach)
 
   /**
-   * Materializes to `Future[Done]` that completes on getting termination message.
-   * The Future completes with success when received complete message from upstream or cancel
+   * Materializes to `CompletionStage<Done>` that completes on getting termination message.
+   * The future completes with success when received complete message from upstream or cancel
    * from downstream. It fails with the same error when received error message from
    * downstream.
    */
