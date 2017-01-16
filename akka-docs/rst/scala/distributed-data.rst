@@ -71,7 +71,7 @@ function that only uses the data parameter and stable fields from enclosing scop
 for example not access ``sender()`` reference of an enclosing actor.
 
 ``Update`` is intended to only be sent from an actor running in same local ``ActorSystem`` as
- * the `Replicator`, because the `modify` function is typically not serializable.
+ the ``Replicator``, because the ``modify`` function is typically not serializable.
 
 You supply a write consistency level which has the following meaning:
 
@@ -84,7 +84,11 @@ You supply a write consistency level which has the following meaning:
   (or cluster role group)
 * ``WriteAll`` the value will immediately be written to all nodes in the cluster
   (or all nodes in the cluster role group)
-  
+
+When you specify to write to ``n`` out of ``x`` nodes, the update will first replicate to ``n`` nodes. If there are not
+ enough Acks after 1/5th of the timeout, the update will be replicated to ``n`` other nodes. If there are less than n nodes
+ left all of the remaining nodes are used. Reachable nodes are prefered over unreachable nodes.
+
 .. includecode:: code/docs/ddata/DistributedDataDocSpec.scala#update  
 
 As reply of the ``Update`` a ``Replicator.UpdateSuccess`` is sent to the sender of the
@@ -313,7 +317,7 @@ track causality of the operations and resolve concurrent updates.
 Maps
 ----
 
-``ORMap`` (observed-remove map) is a map with ``String`` keys and the values are ``ReplicatedData``
+``ORMap`` (observed-remove map) is a map with keys of ``Any`` type and the values are ``ReplicatedData``
 types themselves. It supports add, remove and delete any number of times for a map entry.
 
 If an entry is concurrently added and removed, the add will win. You cannot remove an entry that
@@ -329,8 +333,8 @@ such as the following specialized maps.
 ``ORMultiMap`` (observed-remove multi-map) is a multi-map implementation that wraps an
 ``ORMap`` with an ``ORSet`` for the map's value.
 
-``PNCounterMap`` (positive negative counter map) is a map of named counters. It is a specialized 
-``ORMap`` with ``PNCounter`` values.
+``PNCounterMap`` (positive negative counter map) is a map of named counters (where the name can be of any type).
+It is a specialized ``ORMap`` with ``PNCounter`` values.
 
 ``LWWMap`` (last writer wins map) is a specialized ``ORMap`` with ``LWWRegister`` (last writer wins register)
 values. 
@@ -448,6 +452,56 @@ look like for the ``TwoPhaseSet``:
 
 .. includecode:: code/docs/ddata/protobuf/TwoPhaseSetSerializer2.scala#serializer
   
+Durable Storage
+---------------
+
+By default the data is only kept in memory. It is redundant since it is replicated to other nodes 
+in the cluster, but if you stop all nodes the data is lost, unless you have saved it 
+elsewhere. 
+
+Entries can be configured to be durable, i.e. stored on local disk on each node. The stored data will be loaded
+next time the replicator is started, i.e. when actor system is restarted. This means data will survive as 
+long as at least one node from the old cluster takes part in a new cluster. The keys of the durable entries
+are configured with::
+
+  akka.cluster.distributed-data.durable.keys = ["a", "b", "durable*"]
+
+Prefix matching is supported by using ``*`` at the end of a key.
+
+All entries can be made durable by specifying::
+
+  akka.cluster.distributed-data.durable.keys = ["*"]
+
+`LMDB <https://symas.com/products/lightning-memory-mapped-database/>`_ is the default storage implementation. It is 
+possible to replace that with another implementation by implementing the actor protocol described in 
+``akka.cluster.ddata.DurableStore`` and defining the ``akka.cluster.distributed-data.durable.store-actor-class``
+property for the new implementation. 
+
+The location of the files for the data is configured with::
+
+  # Directory of LMDB file. There are two options:
+  # 1. A relative or absolute path to a directory that ends with 'ddata'
+  #    the full name of the directory will contain name of the ActorSystem
+  #    and its remote port.
+  # 2. Otherwise the path is used as is, as a relative or absolute path to
+  #    a directory.
+  akka.cluster.distributed-data.durable.lmdb.dir = "ddata"
+
+Making the data durable has of course a performance cost. By default, each update is flushed
+to disk before the ``UpdateSuccess`` reply is sent. For better performance, but with the risk of losing 
+the last writes if the JVM crashes, you can enable write behind mode. Changes are then accumulated during
+a time period before it is written to LMDB and flushed to disk. Enabling write behind is especially
+efficient when performing many writes to the same key, because it is only the last value for each key 
+that will be serialized and stored. The risk of losing writes if the JVM crashes is small since the 
+data is typically replicated to other nodes immediately according to the given ``WriteConsistency``.
+
+::
+
+  akka.cluster.distributed-data.lmdb.write-behind-interval = 200 ms
+
+Note that you should be prepared to receive ``WriteFailure`` as reply to an ``Update`` of a 
+durable entry if the data could not be stored for some reason. When enabling ``write-behind-interval``
+such errors will only be logged and ``UpdateSuccess`` will still be the reply to the ``Update``.
 
 CRDT Garbage
 ------------
@@ -493,11 +547,6 @@ if you add one element to a Set with 100 existing elements, all 101 elements are
 other nodes. This means that you cannot have too large data entries, because then the remote message
 size will be too large. We might be able to make this more efficient by implementing
 `Efficient State-based CRDTs by Delta-Mutation <http://gsd.di.uminho.pt/members/cbm/ps/delta-crdt-draft16may2014.pdf>`_.
-
-The data is only kept in memory. It is redundant since it is replicated to other nodes 
-in the cluster, but if you stop all nodes the data is lost, unless you have saved it 
-elsewhere. Making the data durable is a possible future feature, but even if we implement that
-it is not intended to be a full featured database.
 
 Learn More about CRDTs
 ======================
